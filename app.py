@@ -4,7 +4,7 @@ import io
 import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from urllib.parse import urljoin
+from urllib.parse import urljoin, unquote
 
 import matplotlib
 matplotlib.use('Agg')
@@ -50,21 +50,36 @@ def find_runs():
 
 
 def list_run(run):
+    """Read DWD directory index and find T_2M GRIB files without assuming suffix layout."""
     folder = f'{BASE}/{run:%H}/t_2m/'
     html = fetch(folder).decode('utf-8', 'replace')
-    # DWD HTML index has actual href names, not the shortened display labels.
-    filenames = re.findall(r'href=["\']([^"\']+)["\']', html, re.I)
-    prefix = f'icon-d2_germany_regular-lat-lon_single-level_{run:%Y%m%d%H}_'
+    from html.parser import HTMLParser
+
+    class HrefParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.links = []
+        def handle_starttag(self, tag, attrs):
+            if tag.lower() == 'a':
+                self.links.extend(v for k, v in attrs if k.lower() == 'href' and v)
+
+    parser = HrefParser()
+    parser.feed(html)
+    filenames = [unquote(link.split('?')[0].split('/')[-1]) for link in parser.links]
+    expected_stamp = run.strftime('%Y%m%d%H')
     files = {}
+    matching = []
     for name in filenames:
-        name = name.split('/')[-1]
-        if not name.startswith(prefix) or not name.lower().endswith('_t_2m.grib2.bz2'):
+        lower = name.lower()
+        if not (lower.endswith('.grib2.bz2') and 't_2m' in lower and expected_stamp in lower):
             continue
-        m = re.search(r'_(\d{3})(?:_(\d{3}))?_T_2M\.grib2\.bz2$', name, re.I)
-        if m:
-            lead = int(m.group(1))
+        matching.append(name)
+        # DWD naming includes a 3-digit forecast hour immediately after run timestamp.
+        match = re.search(r'_' + expected_stamp + r'_(\d{3})(?:_|\.)', lower)
+        if match:
+            lead = int(match.group(1))
             files[lead] = urljoin(folder, name)
-    return files
+    return files, filenames[:8], matching[:8]
 
 
 def decode_grib(url):
@@ -154,18 +169,21 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
     with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
         try:
             selected = None
+            diagnostics = []
             for run in find_runs():
                 try:
-                    files = list_run(run)
-                    # Need at least some usable hours, and a recent run.
+                    files, examples, matching = list_run(run)
                     available = [h for h in range(0, max_steps+1) if h in files]
+                    diagnostics.append(f'{run:%Y-%m-%d %H} UTC: {len(files)} Dateien; Stunden {available}; Beispiele: {matching or examples}')
                     if len(available) >= max(2, max_steps-1):
                         selected = (run, files, available)
                         break
-                except requests.RequestException:
-                    continue
+                except requests.RequestException as exc:
+                    diagnostics.append(f'{run:%Y-%m-%d %H} UTC: {type(exc).__name__}: {exc}')
             if selected is None:
-                raise RuntimeError('Kein ausreichend vollständiger ICON-D2-Lauf gefunden. Bitte später erneut versuchen.')
+                with st.expander('DWD-Diagnose (zum Kopieren)', expanded=True):
+                    st.code('\n'.join(diagnostics))
+                raise RuntimeError('Kein passender ICON-D2-Lauf gefunden. Siehe DWD-Diagnose oben.')
             run, files, hours = selected
             st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
             images = []
@@ -189,6 +207,6 @@ if 'images' in st.session_state:
     choice = st.select_slider('Vorhersagekarte', options=range(len(images)),
                               format_func=lambda i: labels[i])
     h, valid, png = images[choice]
-    st.image(png, use_container_width=True)
+    st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
                        file_name=f'ELBTAL_T2M_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
