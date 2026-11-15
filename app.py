@@ -1,6 +1,8 @@
 """ELBTAL-T2M v0.3 – manually triggered DWD ICON-D2 PNG maps."""
 import bz2
 import io
+import tempfile
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -87,21 +89,34 @@ def decode_grib(url):
     if url.endswith('.bz2'):
         raw = bz2.decompress(raw)
     messages = []
-    with io.BytesIO(raw) as fh:
-        while True:
-            gid = codes_grib_new_from_file(fh)
-            if gid is None:
-                break
+    # ecCodes requires a real file descriptor; BytesIO.fileno() is unsupported.
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='wb', suffix='.grib2', delete=False) as tmp:
+            tmp.write(raw)
+            tmp_path = tmp.name
+        del raw
+        with open(tmp_path, 'rb') as fh:
+            while True:
+                gid = codes_grib_new_from_file(fh)
+                if gid is None:
+                    break
+                try:
+                    lats = np.asarray(codes_get_array(gid, 'latitudes'), dtype=float)
+                    lons = np.asarray(codes_get_array(gid, 'longitudes'), dtype=float)
+                    vals = np.asarray(codes_get_array(gid, 'values'), dtype=float) - 273.15
+                    valid_date = int(codes_get(gid, 'validityDate'))
+                    valid_time = int(codes_get(gid, 'validityTime'))
+                    valid = datetime.strptime(f'{valid_date:08d}{valid_time:04d}', '%Y%m%d%H%M').replace(tzinfo=timezone.utc)
+                    messages.append((lats, lons, vals, valid))
+                finally:
+                    codes_release(gid)
+    finally:
+        if tmp_path is not None:
             try:
-                lats = np.asarray(codes_get_array(gid, 'latitudes'), dtype=float)
-                lons = np.asarray(codes_get_array(gid, 'longitudes'), dtype=float)
-                vals = np.asarray(codes_get_array(gid, 'values'), dtype=float) - 273.15
-                valid_date = int(codes_get(gid, 'validityDate'))
-                valid_time = int(codes_get(gid, 'validityTime'))
-                valid = datetime.strptime(f'{valid_date:08d}{valid_time:04d}', '%Y%m%d%H%M').replace(tzinfo=timezone.utc)
-                messages.append((lats, lons, vals, valid))
-            finally:
-                codes_release(gid)
+                os.unlink(tmp_path)
+            except OSError:
+                pass
     if not messages:
         raise ValueError('Keine GRIB-Nachrichten gefunden.')
     return messages
@@ -161,7 +176,7 @@ def render_png(X, Y, Z, run, valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL-T2M · v0.3')
+st.title('🌡️ ELBTAL-T2M · v0.3.2')
 st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
 st.info('Diese Version interpoliert ICON-D2 auf ein feines Darstellungsraster. Eigenes lokales Downscaling folgt später.')
 max_steps = st.select_slider('Anzahl der Prognosestunden', options=[1, 2, 3, 4, 5, 6], value=6)

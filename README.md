@@ -1,1 +1,3 @@
-ELBTAL-T2M v0.3.1 – Diagnose-Fix für die DWD-Modelllaufsuche.\n\nDateien app.py und requirements.txt in GitHub ersetzen. Bei fehlendem Lauf die angezeigte DWD-Diagnose kopieren. Die GRIB-Daten werden erst nach einem gefundenen Lauf geladen.\n
+# ELBTAL-T2M v0.3.2
+
+Behebt `UnsupportedOperation: fileno` durch temporäre GRIB2-Datei mit echtem Dateideskriptor. Datei wird auch bei Fehlern entfernt.
