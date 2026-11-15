@@ -235,7 +235,7 @@ def get_landuse():
             continue  # incomplete polygon: do not invent its footprint
         area = (vertices[:, 0].max() - vertices[:, 0].min()) * (vertices[:, 1].max() - vertices[:, 1].min())
         polygons.append((area, code, vertices))
-    for _, code, vertices in sorted(polygons, reverse=True):
+    for _, code, vertices in sorted(polygons, key=lambda item: item[0], reverse=True):
         inside = MplPath(vertices).contains_points(coords).reshape(X.shape)
         landuse[inside] = code
     if not polygons:
