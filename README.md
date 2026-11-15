@@ -1,21 +1,13 @@
-# ELBTAL-T2M v0.5
+# ELBTAL-T2M v0.5.2 – Landnutzung offline
 
-Manually triggered DWD ICON-D2 T2M maps for Belgern–Nünchritz.
+## Einmalige Vorbereitung
+1. `app.py` und `requirements.txt` auf GitHub aktualisieren.
+2. Streamlit öffnen, Bereich **Landnutzung einmalig vorbereiten** ausklappen.
+3. **OSM-Landnutzung einmalig abrufen** anklicken. Dieser Schritt benötigt einmalig einen erreichbaren Overpass-Server.
+4. **landuse.npz herunterladen**.
+5. Im GitHub-Repository Ordner `data` anlegen und Datei als `data/landuse.npz` hochladen, Commit speichern.
+6. Nach dem Streamlit-Neustart muss **Gespeichertes Landnutzungsraster gefunden** erscheinen.
 
-## New
-- Optional OSM land-use polygons via public Overpass endpoint
-- Experimental nocturnal temperature adjustment for forest, farmland, industry, residential areas, water
-- Difference PNG: experimental local forecast minus interpolated ICON-D2
-- All forecast images generated first and kept in Streamlit session state for instant switching
-- Existing elevation-only and ICON-D2 comparison remain available
+Danach greifen normale Modellläufe nur noch auf DWD-Daten, Geländedaten und die lokale NPZ-Datei zu. Es findet **kein Overpass-Abruf beim Modellstart** statt.
 
-## Install
-Replace `app.py` and `requirements.txt` in your GitHub repository, redeploy Streamlit, click **DWD-Prognose manuell berechnen**.
-
-## Scientific caveats
-Land-use coefficients are **illustrative heuristics**. They are not derived from observations, and no cloud or wind dependence is included. OSM polygon coverage is incomplete and may be unavailable due to Overpass rate limits. No artificial data are substituted if the land-use request fails; elevation-only maps remain available. Terrain and land-use are not yet validated against independent stations. Grid resolution is a visualization grid, not true 100 m predictive skill. Downloaded PNGs and Streamlit session-state images are not durable across app restarts.
-
-
-## v0.5.1 Bugfix
-
-OSM-Polygonflächen werden ausschließlich nach ihrer Fläche sortiert (`key=lambda item: item[0]`). Bei gleichen Flächen wird nicht mehr versucht, NumPy-Koordinatenarrays miteinander zu vergleichen.
+**Hinweis:** Das OSM-Raster kann unvollständig sein; unbekannte Pixel werden nicht korrigiert. Landnutzungskoeffizienten sind experimentell. Die Datei ist an die aktuellen Koordinatengrenzen und das Rasterformat gebunden. GitHub-Uploads sind bei öffentlichen Repositories öffentlich sichtbar. Streamlit-Sitzungsspeicher ist nicht dauerhaft.

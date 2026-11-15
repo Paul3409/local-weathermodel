@@ -1,4 +1,4 @@
-"""ELBTAL-T2M v0.5 – experimental terrain and land-use temperature correction."""
+"""ELBTAL-T2M v0.5.2 – offline land-use raster for repeatable forecasts."""
 import bz2
 import io
 import tempfile
@@ -19,6 +19,7 @@ from scipy.ndimage import gaussian_filter
 from matplotlib.path import Path as MplPath
 from PIL import Image
 import math
+from pathlib import Path
 from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_release
 
 BASE = 'https://opendata.dwd.de/weather/nwp/icon-d2/grib'
@@ -200,7 +201,6 @@ LANDUSE_TYPES = {
 }
 
 
-@st.cache_data(ttl=86400, show_spinner=False)
 def get_landuse():
     """OSM polygon landuse from Overpass; unknown pixels stay 0 (no correction).
 
@@ -241,6 +241,36 @@ def get_landuse():
     if not polygons:
         raise ValueError('Keine geschlossenen OSM-Landnutzungsflächen geliefert')
     return landuse, len(polygons)
+
+
+LANDUSE_FILE = Path(__file__).resolve().parent / 'data' / 'landuse.npz'
+LANDUSE_SHAPE = (245, 235)
+
+
+def load_landuse_file():
+    """Load only the committed land-use raster; no Overpass request during forecasts."""
+    if not LANDUSE_FILE.is_file():
+        raise FileNotFoundError('data/landuse.npz fehlt. Zuerst unter „Landnutzung vorbereiten“ erzeugen und auf GitHub hochladen.')
+    with np.load(LANDUSE_FILE, allow_pickle=False) as data:
+        raster = data['landuse']
+        bounds = data['bounds']
+        count = int(data['polygon_count'])
+    expected_bounds = np.array([LAT_MIN, LAT_MAX, LON_MIN, LON_MAX])
+    if raster.shape != LANDUSE_SHAPE or raster.dtype != np.uint8:
+        raise ValueError(f'Landnutzungsraster hat unerwartetes Format: {raster.shape} / {raster.dtype}')
+    if not np.allclose(bounds, expected_bounds, rtol=0, atol=1e-8):
+        raise ValueError('Landnutzungsdatei passt nicht zu den aktuellen Modellgrenzen.')
+    if not np.isin(raster, list(range(6))).all():
+        raise ValueError('Ungültige Landnutzungsklassen in der Datei.')
+    return raster, count
+
+
+def encode_landuse_file(raster, count):
+    out = io.BytesIO()
+    np.savez_compressed(out, landuse=raster,
+                        bounds=np.array([LAT_MIN, LAT_MAX, LON_MIN, LON_MAX]),
+                        polygon_count=np.array(count))
+    return out.getvalue()
 
 
 def landuse_temperature_correction(landuse, valid, amplitude=1.0):
@@ -328,10 +358,27 @@ def render_difference(X, Y, difference, run, valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL-T2M · v0.5')
+st.title('🌡️ ELBTAL-T2M · v0.5.2')
 st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
-st.info('Experimentelles Downscaling: Höhenkorrektur und optionale OSM-Landnutzung. Die Landnutzungs-Koeffizienten sind heuristisch, keine validierte Vorhersage. OSM-Abdeckung kann lückenhaft sein.')
-enable_landuse = st.checkbox('Landnutzung ergänzen (OSM/Overpass; experimentell)', value=True)
+st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte OSM-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
+with st.expander('Landnutzung einmalig vorbereiten', expanded=not LANDUSE_FILE.exists()):
+    st.write('Einmalige OSM-Abfrage; anschließend die erzeugte NPZ-Datei unter `data/landuse.npz` in GitHub hochladen. Bei regulären Prognosen wird Overpass **nicht** aufgerufen.')
+    if st.button('OSM-Landnutzung einmalig abrufen'):
+        try:
+            with st.spinner('Lade und rastere OSM-Polygone …'):
+                raster, polygon_count = get_landuse()
+                st.session_state['prepared_landuse'] = encode_landuse_file(raster, polygon_count)
+            st.success(f'{polygon_count} Polygone verarbeitet; {(raster > 0).mean():.1%} Rasterabdeckung. Datei jetzt herunterladen.')
+        except Exception as exc:
+            st.error(f'Einmaliger OSM-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}. Bitte später erneut versuchen.')
+    if 'prepared_landuse' in st.session_state:
+        st.download_button('landuse.npz herunterladen', data=st.session_state['prepared_landuse'],
+                           file_name='landuse.npz', mime='application/octet-stream')
+if LANDUSE_FILE.exists():
+    st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
+else:
+    st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
+enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
 max_steps = st.select_slider('Anzahl der Prognosestunden', options=[1, 2, 3, 4, 5, 6], value=6)
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
     with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
@@ -364,10 +411,10 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             landuse = None
             if enable_landuse and terrain is not None:
                 try:
-                    landuse, polygon_count = get_landuse()
+                    landuse, polygon_count = load_landuse_file()
                     st.write(f'OSM-Landnutzung geladen: {polygon_count} Polygone; {(landuse > 0).mean():.0%} Rasterabdeckung')
                 except Exception as land_error:
-                    st.warning(f'OSM-Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
+                    st.warning(f'Gespeicherte Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
             for idx, hour in enumerate(hours):
                 st.write(f'Lade und zeichne +{hour} h ({idx+1}/{len(hours)}) …')
                 messages = decode_grib(files[hour])
