@@ -14,7 +14,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import requests
 import streamlit as st
-from scipy.interpolate import RegularGridInterpolator, griddata
+from scipy.interpolate import griddata, RegularGridInterpolator
+from scipy.ndimage import gaussian_filter
+from PIL import Image
+import math
 from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_release
 
 BASE = 'https://opendata.dwd.de/weather/nwp/icon-d2/grib'
@@ -138,7 +141,58 @@ def interpolate(lats, lons, vals):
     return X, Y, grid
 
 
-def render_png(X, Y, Z, run, valid):
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_terrain():
+    """Load public Terrarium elevation PNG tiles and resample to our 100-m-ish grid.
+
+    Tiles are elevation datasets, not weather observations. If unavailable, raise
+    an error rather than silently generating synthetic elevation.
+    """
+    z = 11
+    lat_axis = np.linspace(LAT_MIN, LAT_MAX, 245)
+    lon_axis = np.linspace(LON_MIN, LON_MAX, 235)
+    X, Y = np.meshgrid(lon_axis, lat_axis)
+    scale = 2 ** z
+    xpix = (X + 180.0) / 360.0 * scale * 256
+    latitude_rad = np.deg2rad(Y)
+    ypix = (1 - np.arcsinh(np.tan(latitude_rad)) / np.pi) / 2 * scale * 256
+    x0 = int(np.floor(np.min(xpix) / 256))
+    x1 = int(np.floor(np.max(xpix) / 256))
+    y0 = int(np.floor(np.min(ypix) / 256))
+    y1 = int(np.floor(np.max(ypix) / 256))
+    mosaic = np.zeros(((y1-y0+1)*256, (x1-x0+1)*256), dtype=np.float32)
+    for tx in range(x0, x1+1):
+        for ty in range(y0, y1+1):
+            url = f'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{tx}/{ty}.png'
+            response = requests.get(url, headers=HEADERS, timeout=30)
+            response.raise_for_status()
+            rgb = np.asarray(Image.open(io.BytesIO(response.content)).convert('RGB'), dtype=np.float32)
+            height = rgb[...,0]*256 + rgb[...,1] + rgb[...,2]/256 - 32768
+            mosaic[(ty-y0)*256:(ty-y0+1)*256, (tx-x0)*256:(tx-x0+1)*256] = height
+    from scipy.ndimage import map_coordinates
+    terrain = map_coordinates(mosaic, [ypix-y0*256, xpix-x0*256], order=1, mode='nearest')
+    if not np.isfinite(terrain).all() or terrain.min() < -100 or terrain.max() > 1500:
+        raise ValueError('Geländedaten außerhalb des plausiblen Wertebereichs')
+    return terrain
+
+
+def downscale_temperature(Z, terrain, lapse_rate=0.0065):
+    """Experimental high-pass terrain correction, NOT a validated T2M forecast.
+
+    A smooth 2.2 km terrain reference avoids adding a domain-wide height offset.
+    It does not replace ICON's native model orography or represent cold-air drainage.
+    """
+    mean_lat = (LAT_MIN + LAT_MAX) / 2
+    dy_m = (LAT_MAX-LAT_MIN)*111_200/(terrain.shape[0]-1)
+    dx_m = (LON_MAX-LON_MIN)*111_200*math.cos(math.radians(mean_lat))/(terrain.shape[1]-1)
+    sigma_y = 2200 / 2.355 / dy_m
+    sigma_x = 2200 / 2.355 / dx_m
+    coarse_terrain = gaussian_filter(terrain, sigma=(sigma_y,sigma_x), mode='nearest')
+    correction = np.clip(-lapse_rate*(terrain-coarse_terrain), -1.5, 1.5)
+    return Z+correction, correction
+
+
+def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None):
     fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
     low = np.floor(np.nanmin(Z) * 2) / 2
@@ -163,11 +217,11 @@ def render_png(X, Y, Z, run, valid):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white', alpha=.25, linewidth=.5)
-    fig.suptitle('ELBTAL-T2M  |  ICON-D2 2-m-Temperatur', fontsize=16, weight='bold', y=.98)
-    ax.set_title(f'Modelllauf: {run:%d.%m.%Y %H:%M} UTC  ·  Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M} MEZ/MESZ', fontsize=9, pad=12)
+    fig.suptitle('ELBTAL-T2M  |  2-m-Temperatur', fontsize=16, weight='bold', y=.98)
+    ax.set_title(f'{mode}  ·  Lauf: {run:%d.%m.%Y %H:%M} UTC  ·  Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M} MEZ/MESZ', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_label('2-m-Lufttemperatur (°C)')
-    fig.text(.5, .025, 'Quelle: DWD OpenData / ICON-D2 · interpolierte Modellwerte, kein 100-m-Downscaling',
+    fig.text(.5, .025, 'DWD ICON-D2 · Geländedaten: AWS Terrain Tiles (Terrarium) · experimentelle Höhenkorrektur' if correction is not None else 'DWD ICON-D2 · interpolierte Originalwerte',
              ha='center', fontsize=8, color='#48566a')
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
@@ -176,9 +230,9 @@ def render_png(X, Y, Z, run, valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL-T2M · v0.3.2')
+st.title('🌡️ ELBTAL-T2M · v0.4')
 st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
-st.info('Diese Version interpoliert ICON-D2 auf ein feines Darstellungsraster. Eigenes lokales Downscaling folgt später.')
+st.info('Experimentelles topografisches Downscaling: lokale Höhenabweichungen werden mit einer Temperaturabnahme von 0,65 °C pro 100 m korrigiert. Noch nicht anhand von Messstationen validiert; keine eigenständige physikalische Wettermodellrechnung.')
 max_steps = st.select_slider('Anzahl der Prognosestunden', options=[1, 2, 3, 4, 5, 6], value=6)
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
     with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
@@ -202,6 +256,12 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             run, files, hours = selected
             st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
             images = []
+            terrain = None
+            try:
+                terrain = get_terrain()
+                st.write(f'Geländedaten geladen: {terrain.min():.0f} bis {terrain.max():.0f} m')
+            except Exception as terrain_error:
+                st.warning(f'Geländedaten nicht verfügbar: {terrain_error}. Es werden nur ICON-D2-Karten erstellt.')
             for idx, hour in enumerate(hours):
                 st.write(f'Lade und zeichne +{hour} h ({idx+1}/{len(hours)}) …')
                 messages = decode_grib(files[hour])
@@ -209,7 +269,12 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 target = run + timedelta(hours=hour)
                 msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
                 X, Y, Z = interpolate(*msg[:3])
-                images.append((hour, msg[3], render_png(X, Y, Z, run, msg[3])))
+                original_png = render_png(X, Y, Z, run, msg[3])
+                local_png = None
+                if terrain is not None:
+                    local, correction = downscale_temperature(Z, terrain)
+                    local_png = render_png(X, Y, local, run, msg[3], mode='Lokale Höhenkorrektur · experimentell', correction=correction)
+                images.append((hour, msg[3], original_png, local_png))
             st.session_state['images'] = images
             status.update(label='Temperaturkarten erstellt', state='complete')
         except Exception as exc:
@@ -218,10 +283,13 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
 
 if 'images' in st.session_state:
     images = st.session_state['images']
-    labels = [f'+{h} h · {v.astimezone(TZ):%H:%M}' for h, v, _ in images]
+    labels = [f'+{h} h · {v.astimezone(TZ):%H:%M}' for h, v, _, _ in images]
     choice = st.select_slider('Vorhersagekarte', options=range(len(images)),
                               format_func=lambda i: labels[i])
-    h, valid, png = images[choice]
+    h, valid, original_png, local_png = images[choice]
+    variants = ['ICON-D2 (interpoliert)'] + (['Lokales Downscaling (experimentell)'] if local_png else [])
+    variant = st.radio('Kartentyp', variants, horizontal=True)
+    png = local_png if variant.startswith('Lokales') else original_png
     st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
-                       file_name=f'ELBTAL_T2M_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
+                       file_name=f'ELBTAL_T2M_{"LOCAL" if variant.startswith("Lokales") else "ICON"}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
