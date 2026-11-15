@@ -1,4 +1,4 @@
-"""ELBTAL-T2M v0.3 – manually triggered DWD ICON-D2 PNG maps."""
+"""ELBTAL-T2M v0.5 – experimental terrain and land-use temperature correction."""
 import bz2
 import io
 import tempfile
@@ -16,6 +16,7 @@ import requests
 import streamlit as st
 from scipy.interpolate import griddata, RegularGridInterpolator
 from scipy.ndimage import gaussian_filter
+from matplotlib.path import Path as MplPath
 from PIL import Image
 import math
 from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_release
@@ -192,6 +193,75 @@ def downscale_temperature(Z, terrain, lapse_rate=0.0065):
     return Z+correction, correction
 
 
+LANDUSE_TYPES = {
+    'forest': 1, 'wood': 1, 'farmland': 2, 'meadow': 2, 'grass': 2,
+    'industrial': 3, 'commercial': 3, 'residential': 4, 'retail': 4,
+    'water': 5, 'reservoir': 5,
+}
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def get_landuse():
+    """OSM polygon landuse from Overpass; unknown pixels stay 0 (no correction).
+
+    This is an incomplete map, not an official full-coverage land-cover raster.
+    """
+    query = f"""[out:json][timeout:45];(
+      way["landuse"~"^(forest|farmland|meadow|grass|industrial|commercial|residential|retail|reservoir)$"]({LAT_MIN},{LON_MIN},{LAT_MAX},{LON_MAX});
+      way["natural"~"^(wood|water)$"]({LAT_MIN},{LON_MIN},{LAT_MAX},{LON_MAX});
+    );out geom;"""
+    response = requests.post('https://overpass.kumi.systems/api/interpreter',
+                             data={'data': query}, timeout=85, headers=HEADERS)
+    response.raise_for_status()
+    elements = response.json().get('elements', [])
+    lat_axis = np.linspace(LAT_MIN, LAT_MAX, 245)
+    lon_axis = np.linspace(LON_MIN, LON_MAX, 235)
+    X, Y = np.meshgrid(lon_axis, lat_axis)
+    coords = np.column_stack([X.ravel(), Y.ravel()])
+    landuse = np.zeros(X.shape, dtype=np.uint8)
+    # Larger polygons first; smaller polygons override them.
+    polygons = []
+    for e in elements:
+        geom = e.get('geometry', [])
+        if len(geom) < 4:
+            continue
+        tags = e.get('tags', {})
+        kind = tags.get('natural') or tags.get('landuse')
+        code = LANDUSE_TYPES.get(kind)
+        if code is None:
+            continue
+        vertices = np.array([[g['lon'], g['lat']] for g in geom], dtype=float)
+        if np.linalg.norm(vertices[0] - vertices[-1]) > 1e-6:
+            continue  # incomplete polygon: do not invent its footprint
+        area = (vertices[:, 0].max() - vertices[:, 0].min()) * (vertices[:, 1].max() - vertices[:, 1].min())
+        polygons.append((area, code, vertices))
+    for _, code, vertices in sorted(polygons, reverse=True):
+        inside = MplPath(vertices).contains_points(coords).reshape(X.shape)
+        landuse[inside] = code
+    if not polygons:
+        raise ValueError('Keine geschlossenen OSM-Landnutzungsflächen geliefert')
+    return landuse, len(polygons)
+
+
+def landuse_temperature_correction(landuse, valid, amplitude=1.0):
+    """Experimental, heuristic land-use signal, NOT a validated physical model.
+
+    Assumes a generic calm clear night; no wind/cloud input available yet.
+    Zero-centered spatial correction prevents artificial domain-wide bias.
+    """
+    hour = valid.astimezone(TZ).hour
+    # Smooth day-night transition, largest magnitude near 03:00 local time.
+    night = float(np.clip((np.cos((hour - 3) * 2 * np.pi / 24) + 0.2) / 1.2, 0, 1))
+    # Illustrative coefficients in Celsius for each OSM category.
+    effects = np.array([0.0, 0.15, -0.45, 0.50, 0.30, 0.25], dtype=float)
+    correction = effects[landuse] * night * amplitude
+    known = landuse > 0
+    if np.any(known):
+        correction[known] -= float(correction[known].mean())
+    correction = gaussian_filter(correction, sigma=1.0)
+    return np.clip(correction, -0.8, 0.8)
+
+
 def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None):
     fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
@@ -229,10 +299,39 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     return out.getvalue()
 
 
+def render_difference(X, Y, difference, run, valid):
+    fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
+    fig.patch.set_facecolor('#f6f8fa')
+    bound = max(.2, np.ceil(np.nanmax(np.abs(difference)) * 10) / 10)
+    levels = np.linspace(-bound, bound, 21)
+    filled = ax.contourf(X, Y, difference, levels=levels, cmap='RdBu_r', extend='both')
+    for name, (lat, lon) in PLACES.items():
+        if LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX:
+            ax.plot(lon, lat, 'ko', markersize=2.5)
+            ax.annotate(name, (lon, lat), xytext=(4, 4), textcoords='offset points',
+                        fontsize=8, weight='bold', bbox=dict(facecolor='white', alpha=.75, edgecolor='none', pad=1))
+    ax.set_xlim(LON_MIN, LON_MAX)
+    ax.set_ylim(LAT_MIN, LAT_MAX)
+    ax.set_aspect(1 / np.cos(np.deg2rad((LAT_MIN+LAT_MAX)/2)))
+    ax.set_xlabel('Längengrad (°O)')
+    ax.set_ylabel('Breitengrad (°N)')
+    ax.grid(color='white', alpha=.25, linewidth=.5)
+    fig.suptitle('ELBTAL-T2M  |  Differenzkarte', fontsize=16, weight='bold', y=.98)
+    ax.set_title(f'Lokales Experiment minus ICON-D2 · Lauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M}', fontsize=8, pad=12)
+    cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
+    cb.set_label('Temperaturabweichung (°C)')
+    fig.text(.5, .025, 'Heuristische Höhen- und OSM-Korrektur · keine validierte Prognose', ha='center', fontsize=8, color='#48566a')
+    out = io.BytesIO()
+    fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
+    plt.close(fig)
+    return out.getvalue()
+
+
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL-T2M · v0.4')
+st.title('🌡️ ELBTAL-T2M · v0.5')
 st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
-st.info('Experimentelles topografisches Downscaling: lokale Höhenabweichungen werden mit einer Temperaturabnahme von 0,65 °C pro 100 m korrigiert. Noch nicht anhand von Messstationen validiert; keine eigenständige physikalische Wettermodellrechnung.')
+st.info('Experimentelles Downscaling: Höhenkorrektur und optionale OSM-Landnutzung. Die Landnutzungs-Koeffizienten sind heuristisch, keine validierte Vorhersage. OSM-Abdeckung kann lückenhaft sein.')
+enable_landuse = st.checkbox('Landnutzung ergänzen (OSM/Overpass; experimentell)', value=True)
 max_steps = st.select_slider('Anzahl der Prognosestunden', options=[1, 2, 3, 4, 5, 6], value=6)
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
     with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
@@ -262,6 +361,13 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 st.write(f'Geländedaten geladen: {terrain.min():.0f} bis {terrain.max():.0f} m')
             except Exception as terrain_error:
                 st.warning(f'Geländedaten nicht verfügbar: {terrain_error}. Es werden nur ICON-D2-Karten erstellt.')
+            landuse = None
+            if enable_landuse and terrain is not None:
+                try:
+                    landuse, polygon_count = get_landuse()
+                    st.write(f'OSM-Landnutzung geladen: {polygon_count} Polygone; {(landuse > 0).mean():.0%} Rasterabdeckung')
+                except Exception as land_error:
+                    st.warning(f'OSM-Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
             for idx, hour in enumerate(hours):
                 st.write(f'Lade und zeichne +{hour} h ({idx+1}/{len(hours)}) …')
                 messages = decode_grib(files[hour])
@@ -271,10 +377,17 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 X, Y, Z = interpolate(*msg[:3])
                 original_png = render_png(X, Y, Z, run, msg[3])
                 local_png = None
+                combined_png = None
+                diff_png = None
                 if terrain is not None:
                     local, correction = downscale_temperature(Z, terrain)
                     local_png = render_png(X, Y, local, run, msg[3], mode='Lokale Höhenkorrektur · experimentell', correction=correction)
-                images.append((hour, msg[3], original_png, local_png))
+                    if landuse is not None:
+                        lu_corr = landuse_temperature_correction(landuse, msg[3])
+                        combined = local + lu_corr
+                        combined_png = render_png(X, Y, combined, run, msg[3], mode='Höhe + OSM-Landnutzung · experimentell', correction=combined-Z)
+                        diff_png = render_difference(X, Y, combined-Z, run, msg[3])
+                images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
             st.session_state['images'] = images
             status.update(label='Temperaturkarten erstellt', state='complete')
         except Exception as exc:
@@ -283,13 +396,18 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
 
 if 'images' in st.session_state:
     images = st.session_state['images']
-    labels = [f'+{h} h · {v.astimezone(TZ):%H:%M}' for h, v, _, _ in images]
+    labels = [f'+{item[0]} h · {item[1].astimezone(TZ):%H:%M}' for item in images]
     choice = st.select_slider('Vorhersagekarte', options=range(len(images)),
                               format_func=lambda i: labels[i])
-    h, valid, original_png, local_png = images[choice]
-    variants = ['ICON-D2 (interpoliert)'] + (['Lokales Downscaling (experimentell)'] if local_png else [])
-    variant = st.radio('Kartentyp', variants, horizontal=True)
-    png = local_png if variant.startswith('Lokales') else original_png
+    h, valid, original_png, local_png, combined_png, diff_png = images[choice]
+    variants = {'ICON-D2 (interpoliert)': original_png}
+    if local_png is not None:
+        variants['Höhenkorrektur'] = local_png
+    if combined_png is not None:
+        variants['Höhe + Landnutzung'] = combined_png
+        variants['Differenz zu ICON-D2'] = diff_png
+    variant = st.radio('Kartentyp', list(variants), horizontal=True)
+    png = variants[variant]
     st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
-                       file_name=f'ELBTAL_T2M_{"LOCAL" if variant.startswith("Lokales") else "ICON"}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
+                       file_name=f'ELBTAL_T2M_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')

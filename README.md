@@ -1,19 +1,16 @@
-# ELBTAL-T2M v0.4
+# ELBTAL-T2M v0.5
 
-Manuell gestartete, statische Temperaturkarten aus DWD ICON-D2 für Belgern–Nünchritz.
+Manually triggered DWD ICON-D2 T2M maps for Belgern–Nünchritz.
 
-## Neu
-- Experimentelle kleinräumige Geländekorrektur mit echten Höhenrastern (AWS Terrain Tiles / Terrarium)
-- Original-ICON-D2 und lokales Ergebnis separat auswählbar
-- Prognosekarten einmalig berechnen und während der Streamlit-Sitzung zwischen PNGs wechseln
-- Karten als PNG herunterladen
+## New
+- Optional OSM land-use polygons via public Overpass endpoint
+- Experimental nocturnal temperature adjustment for forest, farmland, industry, residential areas, water
+- Difference PNG: experimental local forecast minus interpolated ICON-D2
+- All forecast images generated first and kept in Streamlit session state for instant switching
+- Existing elevation-only and ICON-D2 comparison remain available
 
-## Installation
-`app.py` und `requirements.txt` im GitHub-Repository ersetzen, dann Streamlit neu starten.
+## Install
+Replace `app.py` and `requirements.txt` in your GitHub repository, redeploy Streamlit, click **DWD-Prognose manuell berechnen**.
 
-## Grenzen
-Die Geländekorrektur basiert auf einer pauschalen Temperaturabnahme von 0,65 °C pro 100 Höhenmeter, angewendet nur auf die Abweichung zur geglätteten Geländehöhe (~2,2 km Skala). Sie ist keine validierte Verbesserung gegenüber ICON-D2, modelliert weder nächtliche Kaltluftseen noch Bebauung oder Elbeinfluss und ersetzt nicht die native Modellorografie. 100 m ist die ungefähre Ausgabeauflösung, nicht die meteorologische Vorhersagegenauigkeit. Bei Ausfall der Höhendaten werden Originalkarten erzeugt.
-
-Die PNGs liegen nur in der aktuellen Streamlit-Session im Speicher; nach Neustart gehen sie verloren. Keine automatischen Hintergrundläufe.
-
-Quelle Wetterdaten: DWD OpenData ICON-D2. Geländedaten: AWS Terrain Tiles (Terrarium).
+## Scientific caveats
+Land-use coefficients are **illustrative heuristics**. They are not derived from observations, and no cloud or wind dependence is included. OSM polygon coverage is incomplete and may be unavailable due to Overpass rate limits. No artificial data are substituted if the land-use request fails; elevation-only maps remain available. Terrain and land-use are not yet validated against independent stations. Grid resolution is a visualization grid, not true 100 m predictive skill. Downloaded PNGs and Streamlit session-state images are not durable across app restarts.
