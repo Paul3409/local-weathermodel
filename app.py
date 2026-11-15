@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import requests
+import time
 import streamlit as st
 
 st.set_page_config(page_title="ELBTAL-T2M", page_icon="🌡️", layout="wide")
@@ -18,20 +19,38 @@ LONS = np.linspace(WEST, EAST, 5)
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_forecast():
     coords = [(float(lat), float(lon)) for lat in LATS for lon in LONS]
-    params = {
-        "latitude": ",".join(f"{lat:.5f}" for lat, _ in coords),
-        "longitude": ",".join(f"{lon:.5f}" for _, lon in coords),
-        "hourly": "temperature_2m",
-        "forecast_days": 2,
-        "timezone": "Europe/Berlin",
-    }
-    response = requests.get("https://api.open-meteo.com/v1/forecast", params=params, timeout=45)
-    response.raise_for_status()
-    payload = response.json()
-    if isinstance(payload, dict):
-        payload = [payload]
-    if len(payload) != len(coords):
-        raise ValueError("Die API lieferte nicht die erwartete Anzahl an Rasterpunkten.")
+    payload = []
+    # Kleine Pakete reduzieren die Last je Anfrage.
+    for start in range(0, len(coords), 5):
+        batch = coords[start:start + 5]
+        params = {
+            "latitude": ",".join(f"{lat:.5f}" for lat, _ in batch),
+            "longitude": ",".join(f"{lon:.5f}" for _, lon in batch),
+            "hourly": "temperature_2m",
+            "forecast_hours": 8,
+            "timezone": "Europe/Berlin",
+        }
+        for attempt in range(3):
+            try:
+                response = requests.get(
+                    "https://api.open-meteo.com/v1/forecast",
+                    params=params,
+                    timeout=(10, 25),
+                )
+                response.raise_for_status()
+                result = response.json()
+                if isinstance(result, dict):
+                    result = [result]
+                if len(result) != len(batch):
+                    raise ValueError("Unerwartete Anzahl an Wetterdatenpunkten.")
+                payload.extend(result)
+                break
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                if attempt == 2:
+                    raise requests.RequestException(
+                        f"Datenabruf nach 3 Versuchen fehlgeschlagen: {exc}"
+                    ) from exc
+                time.sleep(1.5 * (attempt + 1))
     return coords, payload
 
 if st.button("🌤️ Prognose jetzt abrufen", type="primary"):
