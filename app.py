@@ -1,126 +1,194 @@
+"""ELBTAL-T2M v0.3 – manually triggered DWD ICON-D2 PNG maps."""
+import bz2
 import io
-import time
-import numpy as np
-import pandas as pd
-import requests
-import streamlit as st
+import re
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from urllib.parse import urljoin
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.colors import BoundaryNorm
+import numpy as np
+import requests
+import streamlit as st
+from scipy.interpolate import RegularGridInterpolator, griddata
+from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_release
 
-st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='wide')
-st.title('🌡️ ELBTAL-T2M')
-st.caption('Version 0.2 · statische PNG-Modellkarten · noch kein 100-m-Downscaling')
-SOUTH, NORTH = 51.28, 51.50
-WEST, EAST = 13.10, 13.37
-LATS = np.linspace(SOUTH, NORTH, 5)
-LONS = np.linspace(WEST, EAST, 5)
+BASE = 'https://opendata.dwd.de/weather/nwp/icon-d2/grib'
+LAT_MIN, LAT_MAX = 51.28, 51.50
+LON_MIN, LON_MAX = 13.10, 13.37
+PLACES = {
+    'Belgern': (51.483, 13.125),
+    'Mühlberg': (51.434, 13.222),
+    'Nünchritz': (51.299, 13.388),
+    'Glaubitz': (51.325, 13.379),
+    'Zeithain': (51.334, 13.338),
+}
+# Slightly wider longitude extent so the eastern towns remain visible.
+LON_MAX = 13.40
+TZ = ZoneInfo('Europe/Berlin')
+HEADERS = {'User-Agent': 'ELBTAL-T2M/0.3 (educational weather visualization)'}
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def fetch_forecast():
-    coords = [(float(lat), float(lon)) for lat in LATS for lon in LONS]
-    payload = []
-    for start in range(0, len(coords), 5):
-        batch = coords[start:start + 5]
-        params = {
-            'latitude': ','.join(f'{lat:.5f}' for lat, _ in batch),
-            'longitude': ','.join(f'{lon:.5f}' for _, lon in batch),
-            'hourly': 'temperature_2m',
-            'forecast_hours': 8,
-            'timezone': 'Europe/Berlin',
-        }
-        for attempt in range(3):
-            try:
-                response = requests.get('https://api.open-meteo.com/v1/forecast', params=params, timeout=(10, 25))
-                response.raise_for_status()
-                result = response.json()
-                if isinstance(result, dict):
-                    result = [result]
-                if len(result) != len(batch):
-                    raise ValueError('Unerwartete Anzahl an Wetterdatenpunkten.')
-                payload.extend(result)
+
+def fetch(url, timeout=35):
+    r = requests.get(url, timeout=timeout, headers=HEADERS)
+    r.raise_for_status()
+    return r.content
+
+
+def find_runs():
+    """Use directory contents, not guessed initialization times; fallback across recent cycles."""
+    now = datetime.now(timezone.utc)
+    candidates = []
+    for hours_ago in range(0, 31, 3):
+        t = (now - timedelta(hours=hours_ago)).replace(minute=0, second=0, microsecond=0)
+        t = t.replace(hour=t.hour // 3 * 3)
+        if t not in candidates:
+            candidates.append(t)
+    return candidates
+
+
+def list_run(run):
+    folder = f'{BASE}/{run:%H}/t_2m/'
+    html = fetch(folder).decode('utf-8', 'replace')
+    # DWD HTML index has actual href names, not the shortened display labels.
+    filenames = re.findall(r'href=["\']([^"\']+)["\']', html, re.I)
+    prefix = f'icon-d2_germany_regular-lat-lon_single-level_{run:%Y%m%d%H}_'
+    files = {}
+    for name in filenames:
+        name = name.split('/')[-1]
+        if not name.startswith(prefix) or not name.lower().endswith('_t_2m.grib2.bz2'):
+            continue
+        m = re.search(r'_(\d{3})(?:_(\d{3}))?_T_2M\.grib2\.bz2$', name, re.I)
+        if m:
+            lead = int(m.group(1))
+            files[lead] = urljoin(folder, name)
+    return files
+
+
+def decode_grib(url):
+    raw = fetch(url, timeout=65)
+    if url.endswith('.bz2'):
+        raw = bz2.decompress(raw)
+    messages = []
+    with io.BytesIO(raw) as fh:
+        while True:
+            gid = codes_grib_new_from_file(fh)
+            if gid is None:
                 break
-            except (requests.Timeout, requests.ConnectionError) as exc:
-                if attempt == 2:
-                    raise requests.RequestException(f'Datenabruf nach 3 Versuchen fehlgeschlagen: {exc}') from exc
-                time.sleep(1.5 * (attempt + 1))
-    return coords, payload
+            try:
+                lats = np.asarray(codes_get_array(gid, 'latitudes'), dtype=float)
+                lons = np.asarray(codes_get_array(gid, 'longitudes'), dtype=float)
+                vals = np.asarray(codes_get_array(gid, 'values'), dtype=float) - 273.15
+                valid_date = int(codes_get(gid, 'validityDate'))
+                valid_time = int(codes_get(gid, 'validityTime'))
+                valid = datetime.strptime(f'{valid_date:08d}{valid_time:04d}', '%Y%m%d%H%M').replace(tzinfo=timezone.utc)
+                messages.append((lats, lons, vals, valid))
+            finally:
+                codes_release(gid)
+    if not messages:
+        raise ValueError('Keine GRIB-Nachrichten gefunden.')
+    return messages
 
-def make_png(z, valid_time, issued_time):
-    # Statische Grafik mit echten 5x5-Daten; keine erfundenen Zwischenwerte.
-    fig, ax = plt.subplots(figsize=(10, 10), dpi=160)
-    fig.patch.set_facecolor('#f5f7fa')
-    ax.set_facecolor('#eef2f5')
-    finite = z[np.isfinite(z)]
-    low = np.floor(finite.min()) - 1
-    high = np.ceil(finite.max()) + 1
-    if high <= low:
-        high = low + 2
-    levels = np.linspace(low, high, 17)
-    norm = BoundaryNorm(levels, ncolors=256, clip=True)
-    # pcolormesh zeigt die originalen Abtastzellen statt scheinbarer 100-m-Details.
-    lon_edges = np.linspace(WEST-(LONS[1]-LONS[0])/2, EAST+(LONS[1]-LONS[0])/2, len(LONS)+1)
-    lat_edges = np.linspace(SOUTH-(LATS[1]-LATS[0])/2, NORTH+(LATS[1]-LATS[0])/2, len(LATS)+1)
-    mesh = ax.pcolormesh(lon_edges, lat_edges, z, cmap='coolwarm', norm=norm, shading='flat')
-    # Isothermen nur soweit die sehr wenigen Stützpunkte sie hergeben.
-    if finite.max()-finite.min() >= 1:
-        contour_levels = np.arange(np.ceil(finite.min()), np.floor(finite.max())+0.01, 1.0)
-        if len(contour_levels):
-            cs = ax.contour(LONS, LATS, z, levels=contour_levels, colors='#283744', linewidths=0.7, alpha=0.8)
-            ax.clabel(cs, fmt='%.0f°', fontsize=8, inline=True)
-    places = [('Belgern',13.1246,51.4828),('Nünchritz',13.386,51.30),('Glaubitz',13.379,51.325)]
-    for name, lon, lat in places:
-        if WEST <= lon <= EAST and SOUTH <= lat <= NORTH:
-            ax.plot(lon,lat,marker='o',markersize=3.5,color='#1b2632',markeredgecolor='white')
-            ax.annotate(name,(lon,lat),xytext=(5,5),textcoords='offset points',fontsize=9,fontweight='bold',color='#1b2632',bbox={'facecolor':'white','alpha':0.7,'edgecolor':'none','pad':1.5})
-    ax.set_xlim(WEST,EAST)
-    ax.set_ylim(SOUTH,NORTH)
-    ax.set_aspect(1/np.cos(np.deg2rad((NORTH+SOUTH)/2)))
+
+def interpolate(lats, lons, vals):
+    # Only a buffered area is needed; keep the download decoding manageable.
+    keep = (lats >= LAT_MIN-.09) & (lats <= LAT_MAX+.09) & (lons >= LON_MIN-.09) & (lons <= LON_MAX+.09)
+    if keep.sum() < 6:
+        raise ValueError('Zu wenige ICON-D2-Rasterpunkte im Modellgebiet.')
+    lat_axis = np.linspace(LAT_MIN, LAT_MAX, 245)
+    lon_axis = np.linspace(LON_MIN, LON_MAX, 235)
+    X, Y = np.meshgrid(lon_axis, lat_axis)
+    # Linear spatial interpolation, not physical 100 m downscaling.
+    grid = griddata(np.column_stack([lons[keep], lats[keep]]), vals[keep], (X, Y), method='linear')
+    if np.isnan(grid).any():
+        nearest = griddata(np.column_stack([lons[keep], lats[keep]]), vals[keep], (X, Y), method='nearest')
+        grid = np.where(np.isnan(grid), nearest, grid)
+    return X, Y, grid
+
+
+def render_png(X, Y, Z, run, valid):
+    fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
+    fig.patch.set_facecolor('#f6f8fa')
+    low = np.floor(np.nanmin(Z) * 2) / 2
+    high = np.ceil(np.nanmax(Z) * 2) / 2
+    if high - low < 2:
+        mid = (low + high) / 2
+        low, high = mid - 1, mid + 1
+    levels = np.linspace(low, high, 21)
+    filled = ax.contourf(X, Y, Z, levels=levels, cmap='coolwarm', extend='both')
+    isolines = np.arange(np.floor(low), np.ceil(high)+.01, .5)
+    contours = ax.contour(X, Y, Z, levels=isolines, colors='#273445', linewidths=.55, alpha=.75)
+    ax.clabel(contours, inline=True, fontsize=7, fmt='%.1f')
+    for name, (lat, lon) in PLACES.items():
+        if LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX:
+            ax.plot(lon, lat, marker='o', color='#101828', markersize=2.5)
+            ax.annotate(name, (lon, lat), xytext=(4, 4), textcoords='offset points',
+                        fontsize=8, weight='bold', color='#15263a',
+                        bbox=dict(facecolor='white', alpha=.72, edgecolor='none', pad=1))
+    ax.set_xlim(LON_MIN, LON_MAX)
+    ax.set_ylim(LAT_MIN, LAT_MAX)
+    ax.set_aspect(1 / np.cos(np.deg2rad((LAT_MIN+LAT_MAX)/2)))
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
-    ax.grid(alpha=.16, linewidth=.5)
-    fig.suptitle('ELBTAL-T2M  |  2-m-Temperatur',fontsize=17,fontweight='bold',y=.98)
-    ax.set_title(f'Gültig: {valid_time:%d.%m.%Y %H:%M} Uhr (Europe/Berlin)\nDatenabruf: {issued_time:%d.%m.%Y %H:%M} Uhr',fontsize=10,pad=14)
-    cbar=fig.colorbar(mesh,ax=ax,orientation='horizontal',fraction=.045,pad=.11,aspect=35,ticks=np.linspace(low,high,9))
-    cbar.set_label('2-m-Lufttemperatur (°C)',fontsize=11)
-    fig.text(.5,.025,'Quelle: Open-Meteo · 25 Abtastpunkte · kein 100-m-Modell · statische Rasterkarte',ha='center',fontsize=8,color='#465568')
-    fig.subplots_adjust(left=.11,right=.93,top=.87,bottom=.13)
-    buffer=io.BytesIO()
-    fig.savefig(buffer,format='png',dpi=160,facecolor=fig.get_facecolor())
+    ax.grid(color='white', alpha=.25, linewidth=.5)
+    fig.suptitle('ELBTAL-T2M  |  ICON-D2 2-m-Temperatur', fontsize=16, weight='bold', y=.98)
+    ax.set_title(f'Modelllauf: {run:%d.%m.%Y %H:%M} UTC  ·  Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M} MEZ/MESZ', fontsize=9, pad=12)
+    cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
+    cb.set_label('2-m-Lufttemperatur (°C)')
+    fig.text(.5, .025, 'Quelle: DWD OpenData / ICON-D2 · interpolierte Modellwerte, kein 100-m-Downscaling',
+             ha='center', fontsize=8, color='#48566a')
+    out = io.BytesIO()
+    fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return buffer.getvalue()
+    return out.getvalue()
 
-if st.button('🌤️ Prognose jetzt abrufen',type='primary'):
-    try:
-        with st.spinner('Temperaturprognosen werden abgerufen …'):
-            coords,payload=fetch_forecast()
-        st.session_state['forecast']=(coords,payload,pd.Timestamp.now(tz='Europe/Berlin'))
-    except (requests.RequestException,ValueError,KeyError) as exc:
-        st.error(f'Abruf fehlgeschlagen: {exc}')
 
-if 'forecast' not in st.session_state:
-    st.info('Starte den Datenabruf über die Schaltfläche oben.')
-    st.stop()
-coords,payload,issued=st.session_state['forecast']
-times=pd.to_datetime(payload[0]['hourly']['time'])
-now=pd.Timestamp.now(tz='Europe/Berlin').tz_localize(None)
-valid=[i for i,t in enumerate(times) if now <= t <= now+pd.Timedelta(hours=6,minutes=59)]
-if not valid:
-    st.warning('Keine passenden Stundenwerte verfügbar. Bitte erneut abrufen.')
-    st.stop()
-step=st.select_slider('Prognosezeitpunkt (stündliche Originaldaten)',options=valid,value=valid[0],format_func=lambda i:times[i].strftime('%d.%m. %H:%M'))
-values=np.array([item['hourly']['temperature_2m'][step] for item in payload],dtype=float)
-if not np.all(np.isfinite(values)):
-    st.error('Einige Temperaturwerte fehlen.')
-    st.stop()
-z=values.reshape(len(LATS),len(LONS))
-png=make_png(z,times[step],issued)
-st.image(png,caption='Statische Modellkarte als PNG – kein Zoomen oder Klicken',use_container_width=True)
-st.download_button('⬇️ Diese Karte als PNG speichern',data=png,file_name=f'ELBTAL_T2M_{times[step]:%Y%m%d_%H%M}.png',mime='image/png')
-a,b,c=st.columns(3)
-a.metric('Minimum',f'{values.min():.1f} °C')
-b.metric('Maximum',f'{values.max():.1f} °C')
-c.metric('Abtastpunkte',str(len(values)))
-st.warning('Die Karte zeigt nur 25 abgefragte Modellwerte. Isothermen sind eine grafische Interpolation; es gibt noch keine unabhängigen 100-m-Prognosen. Gelände- und Landnutzungskorrekturen folgen später.')
-st.caption('Quelle: Open-Meteo Forecast API. Lizenz- und Attributionsbedingungen der Datenanbieter beachten.')
+st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
+st.title('🌡️ ELBTAL-T2M · v0.3')
+st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
+st.info('Diese Version interpoliert ICON-D2 auf ein feines Darstellungsraster. Eigenes lokales Downscaling folgt später.')
+max_steps = st.select_slider('Anzahl der Prognosestunden', options=[1, 2, 3, 4, 5, 6], value=6)
+if st.button('DWD-Prognose manuell berechnen', type='primary'):
+    with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
+        try:
+            selected = None
+            for run in find_runs():
+                try:
+                    files = list_run(run)
+                    # Need at least some usable hours, and a recent run.
+                    available = [h for h in range(0, max_steps+1) if h in files]
+                    if len(available) >= max(2, max_steps-1):
+                        selected = (run, files, available)
+                        break
+                except requests.RequestException:
+                    continue
+            if selected is None:
+                raise RuntimeError('Kein ausreichend vollständiger ICON-D2-Lauf gefunden. Bitte später erneut versuchen.')
+            run, files, hours = selected
+            st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
+            images = []
+            for idx, hour in enumerate(hours):
+                st.write(f'Lade und zeichne +{hour} h ({idx+1}/{len(hours)}) …')
+                messages = decode_grib(files[hour])
+                # Hourly files can contain multiple 15-minute messages: choose exact valid time.
+                target = run + timedelta(hours=hour)
+                msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
+                X, Y, Z = interpolate(*msg[:3])
+                images.append((hour, msg[3], render_png(X, Y, Z, run, msg[3])))
+            st.session_state['images'] = images
+            status.update(label='Temperaturkarten erstellt', state='complete')
+        except Exception as exc:
+            status.update(label='Abruf oder Verarbeitung fehlgeschlagen', state='error')
+            st.error(f'{type(exc).__name__}: {exc}')
+
+if 'images' in st.session_state:
+    images = st.session_state['images']
+    labels = [f'+{h} h · {v.astimezone(TZ):%H:%M}' for h, v, _ in images]
+    choice = st.select_slider('Vorhersagekarte', options=range(len(images)),
+                              format_func=lambda i: labels[i])
+    h, valid, png = images[choice]
+    st.image(png, use_container_width=True)
+    st.download_button('PNG herunterladen', data=png,
+                       file_name=f'ELBTAL_T2M_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')

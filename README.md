@@ -1,23 +1,21 @@
-# ELBTAL-T2M
+# ELBTAL-T2M v0.3
 
-Experimentelles Lokalwetterprojekt für die Region Belgern–Nünchritz–Glaubitz.
+Manuell gestartete, **statische PNG-Temperaturkarten** aus den frei zugänglichen DWD-ICON-D2-Vorhersagen. Für Streamlit Community Cloud.
 
-## Version 0.1
+## Installation
 
-- Manuell gestarteter Abruf echter stündlicher 2-m-Temperaturprognosen über Open-Meteo
-- Grobe Abtastung im Rechteck 51.28–51.50° N, 13.10–13.37° E
-- Interaktive Temperaturdarstellung in Streamlit für die nächsten 6 Stunden
-- **Noch kein** eigenes Downscaling, keine 100-m-Modellauflösung, keine 15-Minuten-Prognose
+1. `app.py` und `requirements.txt` im GitHub-Repository ersetzen.
+2. In Streamlit Community Cloud die App neu starten bzw. auf das automatische Redeploy warten.
+3. Auf **DWD-Prognose manuell berechnen** klicken.
 
-## Start
+## Technische Hinweise
 
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+- Die App liest DWD-Verzeichnislisten, sucht einen verfügbaren Modelllauf und lädt nur `T_2M`-Dateien.
+- Die DWD-Dateien werden als GRIB2/BZip2 geladen und mit `eccodes` dekodiert.
+- Der Modelllauf ist auf Stundenprognosen 0 bis +6 beschränkt, um Ressourcen zu sparen.
+- Feine PNG-Pixel sind **nur räumliche Interpolation**, keine neue physikalische 100-m-Vorhersage.
+- Das östliche Gebiet wurde bis 13.40°O erweitert, damit Nünchritz und Glaubitz auf der Karte liegen.
+- DWD OpenData ist ein Live-Dienst: Dateinamen, Dateiformat und Verfügbarkeit können sich ändern. Bei Änderungen muss der Downloader angepasst werden.
+- DWD-Quelle bitte bei Weiterverbreitung nennen; DWD-Daten unter CC BY 4.0 gemäß geltenden Bedingungen.
 
-Auf Streamlit Community Cloud: GitHub-Repository auswählen und `app.py` als Einstiegspunkt angeben.
-
-## Hinweise
-
-Die Forecast API kann bei dicht beieinanderliegenden Punkten dieselben zugrunde liegenden Modellwerte liefern. Räumliche Glättung oder Darstellung erzeugt keine zusätzliche Prognoseinformation. Die Verwendung der Wetterdaten unterliegt den Bedingungen von Open-Meteo und der jeweiligen Datenquellen.
+Datenquelle: https://opendata.dwd.de/weather/nwp/icon-d2/grib/
