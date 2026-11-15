@@ -1,4 +1,4 @@
-"""ELBTAL-T2M v0.5.2 – offline land-use raster for repeatable forecasts."""
+"""ELBTAL-T2M v0.5.3 – ESA WorldCover offline land-use raster."""
 import bz2
 import io
 import tempfile
@@ -194,53 +194,54 @@ def downscale_temperature(Z, terrain, lapse_rate=0.0065):
     return Z+correction, correction
 
 
-LANDUSE_TYPES = {
-    'forest': 1, 'wood': 1, 'farmland': 2, 'meadow': 2, 'grass': 2,
-    'industrial': 3, 'commercial': 3, 'residential': 4, 'retail': 4,
-    'water': 5, 'reservoir': 5,
-}
+# ESA WorldCover 2021 v200: 10-m land cover, sampled to the forecast grid.
+# Local classes: 0 unknown, 1 trees/shrub, 2 crops/grass, 3 bare,
+# 4 built-up, 5 water/wetland. These are NOT OSM polygon counts.
+WORLDCOVER_URL = (
+    "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/"
+    "ESA_WorldCover_10m_2021_v200_N51E012_Map.tif"
+)
+WORLDCOVER_CLASSES = {10: 1, 20: 1, 30: 2, 40: 2, 50: 4,
+                      60: 3, 70: 0, 80: 5, 90: 5, 95: 1, 100: 2}
 
 
 def get_landuse():
-    """OSM polygon landuse from Overpass; unknown pixels stay 0 (no correction).
+    """Fetch only the Elbtal window from ESA's cloud-optimized GeoTIFF.
 
-    This is an incomplete map, not an official full-coverage land-cover raster.
+    Called exclusively by the one-time preparation button. The raster
+    remains local to the Streamlit session until the NPZ is downloaded.
     """
-    query = f"""[out:json][timeout:45];(
-      way["landuse"~"^(forest|farmland|meadow|grass|industrial|commercial|residential|retail|reservoir)$"]({LAT_MIN},{LON_MIN},{LAT_MAX},{LON_MAX});
-      way["natural"~"^(wood|water)$"]({LAT_MIN},{LON_MIN},{LAT_MAX},{LON_MAX});
-    );out geom;"""
-    response = requests.post('https://overpass.kumi.systems/api/interpreter',
-                             data={'data': query}, timeout=85, headers=HEADERS)
-    response.raise_for_status()
-    elements = response.json().get('elements', [])
-    lat_axis = np.linspace(LAT_MIN, LAT_MAX, 245)
-    lon_axis = np.linspace(LON_MIN, LON_MAX, 235)
+    import rasterio
+    from rasterio.windows import from_bounds, transform as window_transform
+    from rasterio.transform import rowcol
+    lat_axis = np.linspace(LAT_MIN, LAT_MAX, LANDUSE_SHAPE[0])
+    lon_axis = np.linspace(LON_MIN, LON_MAX, LANDUSE_SHAPE[1])
     X, Y = np.meshgrid(lon_axis, lat_axis)
-    coords = np.column_stack([X.ravel(), Y.ravel()])
-    landuse = np.zeros(X.shape, dtype=np.uint8)
-    # Larger polygons first; smaller polygons override them.
-    polygons = []
-    for e in elements:
-        geom = e.get('geometry', [])
-        if len(geom) < 4:
-            continue
-        tags = e.get('tags', {})
-        kind = tags.get('natural') or tags.get('landuse')
-        code = LANDUSE_TYPES.get(kind)
-        if code is None:
-            continue
-        vertices = np.array([[g['lon'], g['lat']] for g in geom], dtype=float)
-        if np.linalg.norm(vertices[0] - vertices[-1]) > 1e-6:
-            continue  # incomplete polygon: do not invent its footprint
-        area = (vertices[:, 0].max() - vertices[:, 0].min()) * (vertices[:, 1].max() - vertices[:, 1].min())
-        polygons.append((area, code, vertices))
-    for _, code, vertices in sorted(polygons, key=lambda item: item[0], reverse=True):
-        inside = MplPath(vertices).contains_points(coords).reshape(X.shape)
-        landuse[inside] = code
-    if not polygons:
-        raise ValueError('Keine geschlossenen OSM-Landnutzungsflächen geliefert')
-    return landuse, len(polygons)
+    try:
+        with rasterio.Env(GDAL_HTTP_MAX_RETRY="2", GDAL_HTTP_RETRY_DELAY="2"):
+            with rasterio.open(WORLDCOVER_URL) as ds:
+                window = from_bounds(LON_MIN, LAT_MIN, LON_MAX, LAT_MAX, ds.transform)
+                window = window.round_offsets().round_lengths()
+                source = ds.read(1, window=window, boundless=True, fill_value=0)
+                transform = window_transform(window, ds.transform)
+    except Exception as exc:
+        raise RuntimeError(
+            "ESA-WorldCover-Download fehlgeschlagen. Prüfe die Verbindung "
+            "zum ESA-S3-Server und versuche es später erneut."
+        ) from exc
+    rows, cols = rowcol(transform, X.ravel(), Y.ravel())
+    rows = np.asarray(rows, dtype=int)
+    cols = np.asarray(cols, dtype=int)
+    valid = (rows >= 0) & (rows < source.shape[0]) & (cols >= 0) & (cols < source.shape[1])
+    sampled = np.zeros(X.size, dtype=np.uint8)
+    sampled[valid] = source[rows[valid], cols[valid]]
+    result = np.zeros(sampled.shape, dtype=np.uint8)
+    for esa_class, local_class in WORLDCOVER_CLASSES.items():
+        result[sampled == esa_class] = local_class
+    raster = result.reshape(X.shape)
+    if (raster > 0).mean() < 0.75:
+        raise ValueError("WorldCover-Raster unvollständig; Datei wird nicht erstellt.")
+    return raster, int((raster > 0).sum())
 
 
 LANDUSE_FILE = Path(__file__).resolve().parent / 'data' / 'landuse.npz'
@@ -283,7 +284,7 @@ def landuse_temperature_correction(landuse, valid, amplitude=1.0):
     # Smooth day-night transition, largest magnitude near 03:00 local time.
     night = float(np.clip((np.cos((hour - 3) * 2 * np.pi / 24) + 0.2) / 1.2, 0, 1))
     # Illustrative coefficients in Celsius for each OSM category.
-    effects = np.array([0.0, 0.15, -0.45, 0.50, 0.30, 0.25], dtype=float)
+    effects = np.array([0.0, 0.15, -0.45, 0.05, 0.30, 0.25], dtype=float)
     correction = effects[landuse] * night * amplitude
     known = landuse > 0
     if np.any(known):
@@ -350,7 +351,7 @@ def render_difference(X, Y, difference, run, valid):
     ax.set_title(f'Lokales Experiment minus ICON-D2 · Lauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M}', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_label('Temperaturabweichung (°C)')
-    fig.text(.5, .025, 'Heuristische Höhen- und OSM-Korrektur · keine validierte Prognose', ha='center', fontsize=8, color='#48566a')
+    fig.text(.5, .025, 'Heuristische Höhen- und WorldCover-Korrektur · keine validierte Prognose', ha='center', fontsize=8, color='#48566a')
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
@@ -358,17 +359,17 @@ def render_difference(X, Y, difference, run, valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL-T2M · v0.5.2')
+st.title('🌡️ ELBTAL-T2M · v0.5.3')
 st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
-st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte OSM-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
+st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte WorldCover-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
 with st.expander('Landnutzung einmalig vorbereiten', expanded=not LANDUSE_FILE.exists()):
-    st.write('Einmalige OSM-Abfrage; anschließend die erzeugte NPZ-Datei unter `data/landuse.npz` in GitHub hochladen. Bei regulären Prognosen wird Overpass **nicht** aufgerufen.')
-    if st.button('OSM-Landnutzung einmalig abrufen'):
+    st.write('Einmalige ESA-WorldCover-Abfrage; anschließend die erzeugte NPZ-Datei unter `data/landuse.npz` in GitHub hochladen. Bei regulären Prognosen wird kein Landnutzungsserver aufgerufen.')
+    if st.button('ESA-WorldCover-Raster einmalig abrufen'):
         try:
-            with st.spinner('Lade und rastere OSM-Polygone …'):
+            with st.spinner('Lade ESA-WorldCover-Ausschnitt …'):
                 raster, polygon_count = get_landuse()
                 st.session_state['prepared_landuse'] = encode_landuse_file(raster, polygon_count)
-            st.success(f'{polygon_count} Polygone verarbeitet; {(raster > 0).mean():.1%} Rasterabdeckung. Datei jetzt herunterladen.')
+            st.success(f'{polygon_count} klassifizierte Rasterzellen; {(raster > 0).mean():.1%} Rasterabdeckung. Datei jetzt herunterladen.')
         except Exception as exc:
             st.error(f'Einmaliger OSM-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}. Bitte später erneut versuchen.')
     if 'prepared_landuse' in st.session_state:
@@ -412,7 +413,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             if enable_landuse and terrain is not None:
                 try:
                     landuse, polygon_count = load_landuse_file()
-                    st.write(f'OSM-Landnutzung geladen: {polygon_count} Polygone; {(landuse > 0).mean():.0%} Rasterabdeckung')
+                    st.write(f'OSM-Landnutzung geladen: {polygon_count} klassifizierte Rasterzellen; {(landuse > 0).mean():.0%} Rasterabdeckung')
                 except Exception as land_error:
                     st.warning(f'Gespeicherte Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
             for idx, hour in enumerate(hours):
@@ -432,7 +433,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     if landuse is not None:
                         lu_corr = landuse_temperature_correction(landuse, msg[3])
                         combined = local + lu_corr
-                        combined_png = render_png(X, Y, combined, run, msg[3], mode='Höhe + OSM-Landnutzung · experimentell', correction=combined-Z)
+                        combined_png = render_png(X, Y, combined, run, msg[3], mode='Höhe + WorldCover-Landnutzung · experimentell', correction=combined-Z)
                         diff_png = render_difference(X, Y, combined-Z, run, msg[3])
                 images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
             st.session_state['images'] = images
