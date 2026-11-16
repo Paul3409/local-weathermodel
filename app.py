@@ -616,7 +616,11 @@ def render_fog(X,Y,Z,run,valid):
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
 st.title(f'🌦️ ELBTAL · V{VERSION}')
-map_region = st.segmented_control('Kartengebiet', options=['Elbtal','KRUMET','🇩🇪 Deutschland Detail','Mitteleuropa','Europa & Nordatlantik','🌍 Globalmodelle','📡 Radar'], default='Elbtal', selection_mode='single')
+map_region = st.segmented_control('Kartengebiet', options=['Elbtal','KRUMET','🇩🇪 Deutschland Detail','Mitteleuropa','Europa & Nordatlantik','🌍 Globalmodelle','📊 Ensembles','📡 Radar'], default='Elbtal', selection_mode='single')
+if map_region == '📊 Ensembles':
+    from ensembles import show as show_ensembles
+    show_ensembles()
+    st.stop()
 if map_region == '📡 Radar':
     from radar import show as show_radar
     show_radar()
