@@ -21,6 +21,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
+MAP_STYLE_VERSION = "t850-palette-2026-11-16-v2"
 
 class Links(HTMLParser):
     def __init__(self):
@@ -233,13 +234,17 @@ def show(region):
                 valid=run+timedelta(hours=lead)
                 X,Y,Z=load_grid(url,valid,REGIONS[region],variable)
                 png=render(X,Y,Z,region,parameter,run,valid)
-                st.session_state["eu_map"]=(region,parameter,lead,valid,png)
+                st.session_state["eu_map"]=(MAP_STYLE_VERSION,region,parameter,lead,valid,png)
                 status.update(label="ICON-EU-Karte erstellt",state="complete")
             except Exception as exc:
                 status.update(label="ICON-EU-Verarbeitung fehlgeschlagen",state="error")
                 st.error(f"{type(exc).__name__}: {exc}")
     result=st.session_state.get("eu_map")
-    if result and result[:3]==(region,parameter,lead):
-        _,_,_,valid,png=result
+    if result and (len(result)!=6 or result[0]!=MAP_STYLE_VERSION):
+        st.session_state.pop("eu_map",None)
+        st.info("Die Karten-Farbskala wurde aktualisiert. Bitte die ICON-EU-Karte erneut berechnen.")
+        result=None
+    if result and len(result)==6 and result[:4]==(MAP_STYLE_VERSION,region,parameter,lead):
+        _,_,_,_,valid,png=result
         st.image(png,width="stretch")
         st.download_button("PNG herunterladen",png,file_name=f"ELBTAL_ICON-EU_{region}_{parameter}_{valid:%Y%m%d_%H%M}.png",mime="image/png")
