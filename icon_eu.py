@@ -249,7 +249,8 @@ def load_gfs(url,valid,bounds,parameter):
 
 def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU"):
     bounds=REGIONS[region]
-    fig,ax=plt.subplots(figsize=(9,8),dpi=120)
+    # A slightly shorter canvas for WW maps; preserve the full geographic extent and native data grid.
+    fig,ax=plt.subplots(figsize=(9,7.25 if parameter=="Signifikantes Wetter" else 8),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
     if parameter=="MSLP":
         from matplotlib.colors import LinearSegmentedColormap, Normalize
