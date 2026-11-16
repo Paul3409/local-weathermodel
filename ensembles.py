@@ -169,14 +169,15 @@ def draw(model,place,run,field,steps,data,precip=None):
     ax.tick_params(colors="#D9E8F6")
     for spine in ax.spines.values():spine.set_color("#5CA8D4")
     ylabel={"msl":"Luftdruck (hPa)","t850":"850-hPa-Temperatur (°C)",
-            "t2":"2-m-Temperatur (°C)","snow":"Schneehöhe (cm)"}[field]
+            "t2":"2-m-Temperatur (°C)","snow":"Schneehöhenzuwachs (cm)" if model=="GEFS" else "Schneefall-Wasseräquivalent (mm)"}[field]
     ax.set_ylabel(ylabel,color="white")
     if field in ("t2","t850"):ax.axhline(0,color="#D9E8F6",ls="--",lw=1)
     ax.xaxis.set_major_locator(DayLocator(interval=2))
     ax.xaxis.set_major_formatter(DateFormatter("%d.%m",tz=LOCAL_TZ))
     ax.yaxis.set_major_locator(MaxNLocator(8))
     if precip is not None:
-        rain=np.nanmean(precip,axis=0)
+        rain=np.maximum(np.diff(precip,axis=1,prepend=np.nan),0)
+        rain=np.nanmean(rain,axis=0)
         ax2=ax.twinx()
         ax2.bar(times,rain,width=.55,color="#44B9F0",alpha=.23)
         ax2.set_ylabel("Niederschlag (mm / Intervall)",color="#83D8FF")
@@ -184,6 +185,7 @@ def draw(model,place,run,field,steps,data,precip=None):
     fig.text(.045,.952,"ELBTAL",color="white",fontsize=25,fontweight="bold")
     fig.text(.045,.916,"W E T T E R K A R T E N",color="#45C8F5",fontsize=9)
     title={"msl":"MSLP","t850":"T850","t2":"T2","snow":"Schneehöhe"}[field]
+    if field=="snow":title="Schneehöhenzuwachs" if model=="GEFS" else "Schneefall-Wasseräquivalent"
     if precip is not None:title="T2 + Niederschlag"
     fig.text(.42,.95,f"Ensemble · {title}",color="white",fontsize=20,fontweight="bold")
     fig.text(.42,.91,f"{model} · {place}",color="#A9C3D9",fontsize=12)
@@ -206,15 +208,17 @@ def show():
     lat,lon=PLACES[place]
     st.caption("Offizielle Ensemble-Einzelmitglieder · GEFS: 30 + Kontrolllauf; ECMWF: 50. Die Berechnung kann wegen der Datenmenge länger dauern.")
     if parameter=="Neuschnee":
-        st.info("GEFS SNOD ist Schneehöhe am Boden, nicht Neuschneezuwachs. Neuschnee wird erst nach verifizierter Differenzbildung angeboten.")
+        st.info("GEFS: positiver Schneehöhenzuwachs aus SNOD (cm), keine direkte Neuschneemessung. ECMWF: Schneefall-Wasseräquivalent (mm), keine Umrechnung in Schneehöhe.")
     if st.button("Ensemble berechnen",type="primary",key="ens_go"):
         with st.spinner("Ensemble-Einzelmitglieder werden direkt von NOAA / ECMWF geladen …"):
             try:
                 field=FIELDS[parameter]
-                if parameter=="Neuschnee":
-                    raise ValueError("Neuschnee aus SNOD ist noch nicht fachlich korrekt implementiert.")
+
                 data,errors=fetch(model,run,field,lat,lon,steps)
                 if np.isfinite(data).sum()==0:raise RuntimeError("Keine gültigen Ensemble-Daten: "+("; ".join(errors[:2]) if errors else "Unbekannter Abruffehler"))
+                if parameter=="Neuschnee":
+                    differences=np.diff(data,axis=1,prepend=np.nan)
+                    data=np.maximum(differences,0) if model=="GEFS" else np.maximum(differences,0)
                 precipitation=None
                 if parameter=="T2 + Niederschlag":
                     precipitation,precip_errors=fetch(model,run,"precip",lat,lon,steps)
