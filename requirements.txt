@@ -6,3 +6,4 @@ matplotlib>=3.8
 eccodes>=2.38
 pillow>=10
 rasterio>=1.4
+pyproj>=3.6
