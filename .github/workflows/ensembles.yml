@@ -1,0 +1,81 @@
+name: Prepare ELBTAL ensemble PNGs
+
+on:
+  schedule:
+    # Runs 4 times daily, with publication buffer after 00/06/12/18 UTC.
+    - cron: '25 5,11,17,23 * * *'
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Ensemble model
+        required: true
+        default: GEFS
+        type: choice
+        options: [GEFS, ECMWF ENS]
+      place:
+        description: Exact place name (e.g. Mühlberg (Elbe))
+        required: true
+        default: Mühlberg (Elbe)
+      parameters:
+        description: Space-separated parameter names (quote multiword parameters)
+        required: true
+        default: T2
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ensemble-png-publisher
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install GRIB decoder and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libeccodes0 libeccodes-dev
+          pip install -r requirements.txt
+      - name: Generate the PNG archive
+        env:
+          MODEL: ${{ github.event.inputs.model || 'GEFS' }}
+          PLACE: ${{ github.event.inputs.place || 'Mühlberg (Elbe)' }}
+          PARAMS: ${{ github.event.inputs.parameters || 'T2' }}
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime, timezone
+          from ensemble_archive import generate, image_path, HORIZONS
+          from model_cycles import recent_cycles
+          model=os.environ['MODEL']
+          place=os.environ['PLACE']
+          # Keep the scheduled workload manageable: T2 is the first fully
+          # automated product. Other parameters can be dispatched manually.
+          parameters=['T2'] if os.environ.get('GITHUB_EVENT_NAME')=='schedule' else [os.environ['PARAMS']]
+          for run in recent_cycles(model,count=2):
+              for param in parameters:
+                  path=image_path(model,place,param,run,HORIZONS[model])
+                  if not path.exists():
+                      generate(model,place,run,HORIZONS[model],param)
+          PY
+      - name: Commit generated PNGs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ensemble_png/
+          if git diff --cached --quiet; then
+            echo "No complete new ensembles available yet"
+          else
+            git commit -m "data: publish completed ELBTAL ensemble PNGs"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
