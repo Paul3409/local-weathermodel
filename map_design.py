@@ -5,6 +5,8 @@ meteorological classification remain untouched.
 """
 import io
 from PIL import Image, ImageDraw, ImageFont
+from matplotlib import font_manager
+from significant_weather import CATEGORIES
 
 NAVY = "#061C35"
 PANEL = "#092844"
@@ -46,6 +48,10 @@ def _font(size, bold=False):
         ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"]
     )
+    try:
+        candidates.insert(0, font_manager.findfont(font_manager.FontProperties(family="DejaVu Sans", weight="bold" if bold else "normal")))
+    except Exception:
+        pass
     for path in candidates:
         try:
             return ImageFont.truetype(path, size)
@@ -55,47 +61,104 @@ def _font(size, bold=False):
 
 
 def frame_png(data, parameter, model, region, run, valid, source=None):
-    """Wrap the existing PNG in a consistent dark navy information frame."""
-    image = Image.open(io.BytesIO(data)).convert("RGB")
-    width = image.width
-    scale = width / 1100.0
-    u = lambda n: round(n * scale)
-    top = u(205)
-    bottom = u(77)
-    margin = u(20)
-    result = Image.new("RGB", (width + 2 * margin, image.height + top + bottom), NAVY)
-    d = ImageDraw.Draw(result)
-    w = result.width
-    d.rounded_rectangle((margin, u(12), w-margin, u(106)), radius=u(12), fill=PANEL, outline=CYAN, width=max(1,u(2)))
-    d.text((u(42),u(23)), "ELBTAL", font=_font(u(42),True), fill=WHITE)
-    d.text((u(44),u(76)), "WETTERKARTEN", font=_font(u(14),True), fill=CYAN)
-    # Keep the parameter name on one line if possible.
-    title = str(parameter).replace("🌦️ ","").replace("🌡️ ","").replace("🌬️ ","").replace("🌧️ ","").replace("💧 ","").replace("💦 ","").replace("🌫️ ","")
-    size = 27 if len(title)<23 else 22
-    d.text((u(350),u(22)), title, font=_font(u(size),True), fill=WHITE)
-    d.text((u(352),u(69)), f"{model}  |  {region}", font=_font(u(18)), fill=MUTED)
-    valid_local = valid.astimezone(__import__("zoneinfo").ZoneInfo("Europe/Berlin"))
-    lead = int(round((valid-run).total_seconds()/3600))
-    cells = [
-        ("MODELLLAUF",run.strftime("%d.%m.%Y  %H:%M UTC")),
-        ("GÜLTIG",valid_local.strftime("%d.%m.%Y  %H:%M %Z")),
-        ("PROGNOSE",f"+{lead} h"),
-    ]
-    gap = u(12)
-    cellw = (w - 2*margin - 2*gap)//3
-    for i,(label,value) in enumerate(cells):
-        x = margin+i*(cellw+gap)
-        d.rounded_rectangle((x,u(118),x+cellw,u(189)),radius=u(10),fill=PANEL,outline="#236F94",width=max(1,u(1)))
-        d.text((x+u(14),u(127)),label,font=_font(u(13),True),fill=CYAN)
-        font_size = 17 if i<2 else 22
-        d.text((x+u(14),u(151)),value,font=_font(u(font_size),True),fill=WHITE)
-    result.paste(image,(margin,top))
-    foot_y = top + image.height + u(12)
-    d.rounded_rectangle((margin,foot_y,w-margin,foot_y+u(51)),radius=u(9),fill=PANEL,outline="#236F94",width=max(1,u(1)))
-    d.text((u(36),foot_y+u(15)),f"Daten: {source or ('DWD' if model.startswith('ICON') else 'NOAA')}  |  {model}  |  {region}",font=_font(u(14)),fill=MUTED)
-    brand="ELBTAL  v1.0"
-    bb=d.textbbox((0,0),brand,font=_font(u(17),True))
-    d.text((w-u(35)-(bb[2]-bb[0]),foot_y+u(13)),brand,font=_font(u(17),True),fill=CYAN)
+    """Professional navy frame. All weather values and palette colors stay intact."""
+    from zoneinfo import ZoneInfo
+    raw = Image.open(io.BytesIO(data)).convert("RGB")
+    # Keep the map itself at its original resolution, avoiding blur.
+    scale = raw.width / 1100.0
+    u = lambda n: max(1, round(n * scale))
+    margin = u(16)
+    top = u(201)
+    is_weather = "Signifikantes Wetter" in str(parameter)
+    legend_h = u(211) if is_weather else 0
+    footer_h = u(80)
+    width = raw.width + margin * 2
+    height = top + raw.height + legend_h + footer_h
+    canvas = Image.new("RGB", (width, height), NAVY)
+    d = ImageDraw.Draw(canvas)
+    def text(x, y, value, size, color=WHITE, bold=False):
+        d.text((u(x),u(y)),str(value),font=_font(u(size),bold),fill=color)
+    def panel(x0,y0,x1,y1,r=10):
+        d.rounded_rectangle((u(x0),u(y0),u(x1),u(y1)),radius=u(r),fill=PANEL,outline="#277CA6",width=max(1,u(2)))
+    base_width = width / scale
+    # Logo strip, matching the reference design: no oversized empty box.
+    d.rectangle((0,0,width,u(108)),fill="#08223E")
+    d.line((0,u(107),width,u(107)),fill="#25739A",width=max(1,u(2)))
+    # Cloud outline with simple vector primitives (no image asset or external request).
+    cx,cy=u(60),u(54)
+    lw=max(2,u(4))
+    for xy in [(cx-u(31),cy-u(12),cx+u(10),cy+u(28)),
+               (cx-u(7),cy-u(34),cx+u(43),cy+u(20)),
+               (cx+u(21),cy-u(11),cx+u(64),cy+u(31))]:
+        d.arc(xy,180,355,fill=CYAN,width=lw)
+    d.line((cx-u(28),cy+u(27),cx+u(55),cy+u(27)),fill=CYAN,width=lw)
+    text(160,11,"ELBTAL",43,bold=True)
+    text(163,67,"W E T T E R K A R T E N",13,CYAN,True)
+    d.line((u(395),u(18),u(395),u(89)),fill=CYAN,width=max(1,u(2)))
+    title = str(parameter)
+    for symbol in ("🌦️ ","🌡️ ","🌬️ ","🌧️ ","💧 ","💦 ","🌫️ "):
+        title=title.replace(symbol,"")
+    title_size=32 if len(title)<23 else 25
+    text(430,12,title,title_size,bold=True)
+    text(433,65,f"{model}  ·  {region}",19,MUTED)
+    # Three status panels with icons and larger, readable typography.
+    xcoords=[16,415,814]
+    widths=[387,387,base_width-830]
+    valid_local=valid.astimezone(ZoneInfo("Europe/Berlin"))
+    lead=round((valid-run).total_seconds()/3600)
+    cells=[("MODELLLAUF",run.strftime("%d.%m.%Y · %H:%M UTC")),
+           ("GÜLTIG",valid_local.strftime("%d.%m.%Y · %H:%M %Z")),
+           ("PROGNOSE",f"+{lead} h")]
+    for i,((label,value),x,cw) in enumerate(zip(cells,xcoords,widths)):
+        panel(x,118,x+cw,185)
+        ix=u(x+18); iy=u(139)
+        if i==0:
+            d.rounded_rectangle((ix,iy,ix+u(29),iy+u(26)),radius=u(3),outline=CYAN,width=max(1,u(2)))
+            d.line((ix,iy+u(8),ix+u(29),iy+u(8)),fill=CYAN,width=max(1,u(2)))
+        elif i==1:
+            d.ellipse((ix,iy,ix+u(28),iy+u(28)),outline=CYAN,width=max(1,u(2)))
+            d.line((ix+u(14),iy+u(5),ix+u(14),iy+u(14),ix+u(21),iy+u(18)),fill=CYAN,width=max(1,u(2)))
+        else:
+            d.polygon([(ix,iy),(ix+u(26),iy+u(14)),(ix,iy+u(28))],outline=CYAN)
+        text(x+59,124,label,13,MUTED,True)
+        text(x+59,147,value,17 if i!=2 else 22,WHITE,True)
+    canvas.paste(raw,(margin,top))
+    if is_weather:
+        # Full-width grouped legend; same exact category colors as the DWD WW raster.
+        ly=(top+raw.height)/scale+u(0)/scale+5
+        panel(16,ly,base_width-16,ly+193)
+        groups=[
+            ("Bewölkung",list(range(0,4))),
+            ("Niederschlag",list(range(5,8))),
+            ("Schneefall",list(range(10,13))),
+            ("Mischformen",[8,9]),
+            ("Gefrierender Regen",[13,14]),
+            ("Nebel / Gewitter",[4,15,16]),
+        ]
+        available=base_width-56
+        cell=available/6
+        for gi,(group,indices) in enumerate(groups):
+            gx=29+gi*cell
+            if gi:
+                d.line((u(gx-10),u(ly+17),u(gx-10),u(ly+177)),fill="#245E83",width=max(1,u(1)))
+            text(gx,ly+13,group,13,WHITE,True)
+            for j,idx in enumerate(indices):
+                label,color=CATEGORIES[idx]
+                yy=ly+44+j*34
+                d.rounded_rectangle((u(gx),u(yy),u(gx+24),u(yy+18)),radius=u(2),fill=color)
+                # Wrap longer entries rather than overflowing the next group.
+                words={"Schneeregen mäßig/stark":"Schneeregen\nmäßig/stark",
+                       "Gefr. Regen mäßig/stark":"Gefr. Regen\nmäßig/stark",
+                       "Gewitter leicht/mäßig":"Gewitter\nleicht/mäßig"}
+                name=words.get(label,label)
+                d.multiline_text((u(gx+30),u(yy-2)),name,font=_font(u(11)),fill=WHITE,spacing=u(1))
+    fy=height-footer_h+u(12)
+    panel(16,fy,base_width-16,fy+52)
+    src=source or ("DWD" if model.startswith("ICON") else "NOAA")
+    text(35,fy+16,f"Daten: {src} ({model})    |    Region: {region}",14,MUTED)
+    brand="ELBTAL v1.0"
+    bb=d.textbbox((0,0),brand,font=_font(u(20),True))
+    d.text((width-u(37)-(bb[2]-bb[0]),u(fy+12)),brand,font=_font(u(20),True),fill=WHITE)
     output=io.BytesIO()
-    result.save(output,format="PNG",optimize=True)
+    canvas.save(output,format="PNG")
     return output.getvalue()
