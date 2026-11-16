@@ -550,7 +550,12 @@ def render_fog(X,Y,Z,run,valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌦️ ELBTAL · v0.9.1')
+st.title('🌦️ ELBTAL · v1.0.0')
+map_region = st.segmented_control('Kartengebiet', options=['Elbtal','Deutschland','Europa'], default='Elbtal', selection_mode='single')
+if map_region in ('Deutschland','Europa'):
+    from icon_eu import show as show_icon_eu
+    show_icon_eu(map_region)
+    st.stop()
 st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
 parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','❄️ Art','💦 Taupunkt','🌫️ Nebel'], default='🌡️ Temperatur', selection_mode='single')
 is_gust = parameter_page == '🌬️ Windböen'
