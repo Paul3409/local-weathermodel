@@ -367,9 +367,9 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU"):
     ax.grid(alpha=.15)
     ax.set_title(f"ELBTAL | {model} {parameter} | {region}\nLauf {run:%d.%m.%Y %H:%M} UTC · Gültig {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",fontsize=11)
     if parameter=="Signifikantes Wetter":
-        fig.subplots_adjust(bottom=.27)
-        fig.legend(handles=legend_handles(),loc="lower center",ncol=4,fontsize=7,
-                   frameon=False,bbox_to_anchor=(.5,.015),columnspacing=.9,handlelength=1.6)
+        ax.set_title("")
+        # Grouped WW legend is drawn in the navy outer frame.
+        fig.subplots_adjust(left=.095,right=.985,top=.975,bottom=.095)
     else:
         cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
     if parameter=="Signifikantes Wetter":
