@@ -322,7 +322,7 @@ def draw_km_temperatures(ax, X, Y, Z, decimals=1):
                     color='#15263a',zorder=7,
                     bbox=dict(facecolor='white',alpha=.7,edgecolor='none',pad=.4))
 
-def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None, show_km_values=False):
+def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None, show_km_values=False, model_name='ICON-D2'):
     fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
     filled = ax.contourf(X,Y,Z,levels=np.arange(-20,20.001,.25),cmap=TEMP_CMAP,norm=TEMP_NORM,extend='both')
@@ -344,7 +344,7 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white', alpha=.25, linewidth=.5)
-    fig.suptitle('ELBTAL | '+('2-m-Taupunkt' if 'Taupunkt' in mode else '2-m-Temperatur'), fontsize=16, weight='bold', y=.98)
+    fig.suptitle(('KRUMET | ' if model_name=='KRUMET' else 'ELBTAL | ')+('2-m-Taupunkt' if 'Taupunkt' in mode else '2-m-Temperatur'), fontsize=16, weight='bold', y=.98)
     ax.set_title(f'{mode}  ·  Lauf: {run:%d.%m.%Y %H:%M} UTC  ·  Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M} MEZ/MESZ', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_ticks([-20,-15,-10,-5,0,.5,5,10,15,20])
@@ -359,10 +359,10 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), ('Taupunkt' if 'Taupunkt' in mode else 'Temperatur'), 'ICON-D2', 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), ('Taupunkt' if 'Taupunkt' in mode else 'Temperatur'), model_name, 'Elbtal', run, valid)
 
 
-def render_difference(X, Y, difference, run, valid):
+def render_difference(X, Y, difference, run, valid, model_name='ICON-D2'):
     fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
     bound = max(.2, np.ceil(np.nanmax(np.abs(difference)) * 10) / 10)
@@ -379,7 +379,7 @@ def render_difference(X, Y, difference, run, valid):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white', alpha=.25, linewidth=.5)
-    fig.suptitle('ELBTAL-T2M  |  Differenzkarte', fontsize=16, weight='bold', y=.98)
+    fig.suptitle(('KRUMET' if model_name=='KRUMET' else 'ELBTAL-T2M')+' | Differenzkarte', fontsize=16, weight='bold', y=.98)
     ax.set_title(f'Lokales Experiment minus ICON-D2 · Lauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M}', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_label('Temperaturabweichung (°C)')
@@ -388,7 +388,7 @@ def render_difference(X, Y, difference, run, valid):
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), 'Temperaturdifferenz', 'ICON-D2', 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), 'Temperaturdifferenz', model_name, 'Elbtal', run, valid)
 
 
 GUST_STOPS = [(0,'#499FE1'),(10,'#204D99'),(20,'#347B4A'),(30,'#A3BE4B'),(40,'#E8D24A'),(50,'#F3A143'),(60,'#E96A38'),(70,'#DB3834'),(80,'#B9252E'),(90,'#811A2C'),(100,'#48205F'),(110,'#853AA8'),(120,'#C52D9A')]
@@ -557,7 +557,7 @@ def render_fog(X,Y,Z,run,valid):
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
 st.title('🌦️ ELBTAL · v1.0.0')
-map_region = st.segmented_control('Kartengebiet', options=['Elbtal','Deutschland','Europa','📡 Radar'], default='Elbtal', selection_mode='single')
+map_region = st.segmented_control('Kartengebiet', options=['Elbtal','KRUMET','Deutschland','Europa','📡 Radar'], default='Elbtal', selection_mode='single')
 if map_region == '📡 Radar':
     from radar import show as show_radar
     show_radar()
@@ -566,8 +566,13 @@ if map_region in ('Deutschland','Europa'):
     from icon_eu import show as show_icon_eu
     show_icon_eu(map_region)
     st.stop()
-st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
-parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','🌦️ Signifikantes Wetter','💦 Taupunkt','🌫️ Nebel'], default='🌡️ Temperatur', selection_mode='single')
+krumet_mode = map_region == 'KRUMET'
+if krumet_mode:
+    st.subheader('🔬 KRUMET v0.1 | Lokale Temperaturverfeinerung')
+    st.caption('Experimentelles ICON-D2-Downscaling mit Gelände und optional ESA WorldCover. Heuristisch, nicht durch Messungen validiert.')
+else:
+    st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
+parameter_page = '🌡️ Temperatur' if krumet_mode else st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','🌦️ Signifikantes Wetter','💦 Taupunkt','🌫️ Nebel'], default='🌡️ Temperatur', selection_mode='single')
 is_gust = parameter_page == '🌬️ Windböen'
 is_precip = parameter_page in ('🌧️ Rate','💧 Summe')
 is_kind = parameter_page == '🌦️ Signifikantes Wetter'
@@ -610,7 +615,7 @@ else:
 # Display an indicative local valid time while choosing lead hours; the exact run is shown after loading.
 preview_run = find_runs()[0]
 st.caption(f'Orientierung: Modelllauf {preview_run:%d.%m.%Y %H:%M} UTC. Bei fehlenden Dateien wird automatisch ein älterer Lauf gewählt; die endgültigen Zeiten stehen an den Karten.')
-start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +48 h)', options=list(range(49)), value=(0, 6), key='window_hour_'+IMAGE_KEYS[parameter_page], format_func=lambda h: f'+{h} h · {(preview_run+timedelta(hours=h)).astimezone(TZ):%d.%m. %H:%M %Z}')
+start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +48 h)', options=list(range(49)), value=(0, 6), key='window_hour_'+('krumet' if krumet_mode else IMAGE_KEYS[parameter_page]), format_func=lambda h: f'+{h} h · {(preview_run+timedelta(hours=h)).astimezone(TZ):%d.%m. %H:%M %Z}')
 st.caption(f'Gewählte Zeitspanne: {(preview_run+timedelta(hours=start_hour)).astimezone(TZ):%d.%m.%Y %H:%M %Z} bis {(preview_run+timedelta(hours=end_hour)).astimezone(TZ):%d.%m.%Y %H:%M %Z} (vorläufig). Es werden Karten nur für +{start_hour} bis +{end_hour} erstellt. Für Niederschlagsraten wird zusätzlich der jeweils vorherige Akkumulationsstand geladen.')
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
     with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
@@ -680,6 +685,8 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 terrain = get_terrain()
                 st.write(f'Geländedaten geladen: {terrain.min():.0f} bis {terrain.max():.0f} m')
             except Exception as terrain_error:
+                if krumet_mode:
+                    raise RuntimeError(f'KRUMET benötigt Geländedaten: {terrain_error}') from terrain_error
                 if parameter_page == '🌡️ Temperatur':
                     st.warning(f'Geländedaten nicht verfügbar: {terrain_error}. Es werden nur ICON-D2-Karten erstellt.')
             landuse = None
@@ -777,20 +784,20 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 diff_png = None
                 if terrain is not None:
                     local, correction = downscale_temperature(Z, terrain)
-                    local_png = tuple(render_png(X,Y,local,run,msg[3],mode='Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag) for flag in (False,True))
+                    local_png = tuple(render_png(X,Y,local,run,msg[3],mode='KRUMET · Höhenkorrektur' if krumet_mode else 'Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag,model_name='KRUMET' if krumet_mode else 'ICON-D2') for flag in (False,True))
                     if landuse is not None:
                         lu_corr = landuse_temperature_correction(landuse, msg[3])
                         combined = local + lu_corr
-                        combined_png = tuple(render_png(X,Y,combined,run,msg[3],mode='Höhe + WorldCover-Landnutzung · experimentell',correction=combined-Z,show_km_values=flag) for flag in (False,True))
-                        diff_png = render_difference(X, Y, combined-Z, run, msg[3])
+                        combined_png = tuple(render_png(X,Y,combined,run,msg[3],mode='KRUMET · Höhe + WorldCover' if krumet_mode else 'Höhe + WorldCover-Landnutzung · experimentell',correction=combined-Z,show_km_values=flag,model_name='KRUMET' if krumet_mode else 'ICON-D2') for flag in (False,True))
+                        diff_png = render_difference(X, Y, combined-Z, run, msg[3],model_name='KRUMET' if krumet_mode else 'ICON-D2')
                 images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
-            st.session_state[IMAGE_KEYS[parameter_page]] = images
+            st.session_state['krumet_images' if krumet_mode else IMAGE_KEYS[parameter_page]] = images
             status.update(label='Karten erstellt', state='complete')
         except Exception as exc:
             status.update(label='Abruf oder Verarbeitung fehlgeschlagen', state='error')
             st.error(f'{type(exc).__name__}: {exc}')
 
-image_key = IMAGE_KEYS[parameter_page]
+image_key = 'krumet_images' if krumet_mode else IMAGE_KEYS[parameter_page]
 if image_key in st.session_state:
     images = st.session_state[image_key]
     labels = [f'+{item[0]:g} h · {item[1].astimezone(TZ):%d.%m.%Y %H:%M %Z}' for item in images]
@@ -798,11 +805,11 @@ if image_key in st.session_state:
                               format_func=lambda i: labels[i], key='hour_'+image_key)
     st.caption(f'Ausgewählt: {labels[choice]}')
     h, valid, original_png, local_png, combined_png, diff_png = images[choice]
-    variants = {parameter_page: original_png} if (is_precip or is_kind or is_dew or is_fog) else ({'ICON-D2 Windböen': original_png} if is_gust else {'ICON-D2 (interpoliert)': original_png})
+    variants = {parameter_page: original_png} if (is_precip or is_kind or is_dew or is_fog) else ({'ICON-D2 Windböen': original_png} if is_gust else {'ICON-D2 (Referenz)': original_png} if krumet_mode else {'ICON-D2 (interpoliert)': original_png})
     if local_png is not None and parameter_page == '🌡️ Temperatur':
-        variants['Höhenkorrektur'] = local_png
+        variants['KRUMET · Höhenkorrektur' if krumet_mode else 'Höhenkorrektur'] = local_png
     if combined_png is not None and parameter_page == '🌡️ Temperatur':
-        variants['Höhe + Landnutzung'] = combined_png
+        variants['KRUMET · Höhe + Landnutzung' if krumet_mode else 'Höhe + Landnutzung'] = combined_png
         variants['Differenz zu ICON-D2'] = diff_png
     variant = st.radio('Kartentyp', list(variants), horizontal=True, key='variant_'+image_key)
     show_km_values = st.checkbox('Werte alle ca. 1 km anzeigen', disabled=is_kind or is_fog, value=False, key='values_'+image_key, help='Interpolierte Modellwerte am jeweiligen Punkt, keine Messwerte.')
