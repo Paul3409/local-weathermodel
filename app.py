@@ -557,7 +557,11 @@ def render_fog(X,Y,Z,run,valid):
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
 st.title('🌦️ ELBTAL · v1.0.0')
-map_region = st.segmented_control('Kartengebiet', options=['Elbtal','Deutschland','Europa'], default='Elbtal', selection_mode='single')
+map_region = st.segmented_control('Kartengebiet', options=['Elbtal','Deutschland','Europa','📡 Radar'], default='Elbtal', selection_mode='single')
+if map_region == '📡 Radar':
+    from radar import show as show_radar
+    show_radar()
+    st.stop()
 if map_region in ('Deutschland','Europa'):
     from icon_eu import show as show_icon_eu
     show_icon_eu(map_region)
