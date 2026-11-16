@@ -21,7 +21,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "mslp-vivid-1030-red-v1"
+MAP_STYLE_VERSION = "mslp-vivid-readable-ticks-v2"
 
 class Links(HTMLParser):
     def __init__(self):
@@ -221,7 +221,8 @@ def render(X,Y,Z,region,parameter,run,valid):
     if parameter=="T850":
         cb.set_ticks(np.arange(-30,31,5))
     else:
-        cb.set_ticks([950,970,985,995,1005,1015,1025,1030,1040,1050,1060])
+        # Avoid crowded labels around 1025/1030 while preserving the exact color mapping.
+        cb.set_ticks([950,970,985,995,1005,1015,1030,1045,1060])
     cb.set_label(label)
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
