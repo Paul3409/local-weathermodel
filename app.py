@@ -23,7 +23,7 @@ from PIL import Image
 import math
 from pathlib import Path
 from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_release
-from krumet_verify import stations as dwd_stations, hourly_temperature as dwd_hourly_temperature, station_grid_value
+from krumet_verify import stations as dwd_stations, hourly_temperature as dwd_hourly_temperature, station_grid_value, archived_icon_d2
 
 BASE = 'https://opendata.dwd.de/weather/nwp/icon-d2/grib'
 LAT_MIN, LAT_MAX = 51.28, 51.50
@@ -972,7 +972,27 @@ if krumet_mode:
                         minimum = night.loc[night['temperature'].idxmin()]
                         st.metric('Tiefste gemessene Stundentemperatur',f"{minimum['temperature']:.1f} °C")
                         st.caption(f"Minimum um {minimum['Ortszeit']:%d.%m.%Y %H:%M} Ortszeit · {len(night)} Stundenmessungen vorhanden")
-                        st.dataframe(night[['Ortszeit','temperature']].rename(columns={'temperature':'DWD 2-m-Temperatur (°C)'}),hide_index=True)
-                        st.info('Für einen fairen Modellvergleich müssen archivierte Prognosen mit identischem Gültigkeitszeitpunkt und dokumentiertem Modelllauf hinzukommen.')
+                        st.markdown('**Archivierte ICON-D2-Prognose (24 Stunden Vorlauf)**')
+                        try:
+                            sid = station_options[station_label]
+                            station = next(row for row in station_list if row[0]==sid)
+                            lat, lon = station[2], station[3]
+                            archived = archived_icon_d2(lat,lon,start_utc.date(),end_utc.date())
+                            archived = archived[(archived['time']>=start_utc)&(archived['time']<=end_utc)]
+                            comparison = night.merge(archived,on='time',how='left')
+                            comparison['ICON-D2-Fehler'] = comparison['temperature_2m']-comparison['temperature']
+                            valid = comparison.dropna(subset=['temperature','temperature_2m']).copy()
+                            if valid.empty:
+                                st.info('Für diese Nacht hat das ICON-D2-Archiv keine passenden 24-h-Prognosen geliefert.')
+                            else:
+                                st.metric('ICON-D2 MAE (24 h Vorlauf)',f"{valid['ICON-D2-Fehler'].abs().mean():.2f} °C")
+                                st.metric('ICON-D2 mittlere Abweichung',f"{valid['ICON-D2-Fehler'].mean():+.2f} °C",help='Positiv bedeutet: ICON-D2 zu mild.')
+                                plot = valid.set_index('Ortszeit')[['temperature','temperature_2m']].rename(columns={'temperature':'DWD gemessen','temperature_2m':'ICON-D2 archiviert'})
+                                st.line_chart(plot,y_label='Temperatur (°C)')
+                                st.dataframe(valid[['Ortszeit','temperature','temperature_2m','ICON-D2-Fehler','wind_speed_10m','cloud_cover']].rename(columns={'temperature':'DWD gemessen','temperature_2m':'ICON-D2 archiviert','wind_speed_10m':'Wind (km/h)','cloud_cover':'Bewölkung (%)'}),hide_index=True)
+                                st.caption('Quelle: Open-Meteo Previous Runs, Modell ICON-D2, feste 24-h-Vorlaufzeit. Modellwerte können durch Open-Meteo-Interpolation und Höhenanpassung von den originalen DWD-GRIB-Rasterwerten abweichen.')
+                                st.info('Ein historischer KRUMET-v0.3-Vergleich ist noch nicht enthalten: Dafür müssen wir die damaligen räumlichen ICON-D2-Felder rekonstruieren. Ein pauschaler Temperaturabzug wäre kein fairer KRUMET-Test.')
+                        except (requests.RequestException,ValueError,KeyError,IndexError) as archive_error:
+                            st.warning(f'Archivierte ICON-D2-Prognosen nicht abrufbar: {type(archive_error).__name__}: {archive_error}')
         except (requests.RequestException,ValueError,KeyError,FileNotFoundError) as exc:
             st.warning(f'Historische DWD-Messwerte derzeit nicht verfügbar: {type(exc).__name__}: {exc}')
