@@ -92,9 +92,9 @@ def discover_d2(run,variable):
         if not lower.endswith(".grib2.bz2") or stamp not in lower or variable not in lower:
             continue
         if variable in ("t","fi"):
-            if "pressure-level" not in lower or not re.search(r"(?:^|_)"+("850" if variable=="t" else "500")+r"(?:_|\\.)",lower):
+            if "pressure-level" not in lower or not re.search(r"(?:^|_)"+("850" if variable=="t" else "500")+r"(?:_|\.)",lower):
                 continue
-        match=re.search("_"+stamp+r"_(\\d{3})(?:_|\\.)",lower)
+        match=re.search("_"+stamp+r"_(\d{3})(?:_|\.)",lower)
         if match:
             result[int(match.group(1))]=urljoin(folder,name)
     return result
@@ -496,7 +496,7 @@ def show(region):
                         selected=(run,available[lead],available.get(previous_lead))
                         break
                 if selected is None:
-                    raise RuntimeError(f"Keine passende {model}-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
+                    raise RuntimeError(f"Keine passende {model}-Datei für {parameter} +{lead} h gefunden. Bitte Modelllauf und DWD-Dateiverfügbarkeit prüfen.")
                 run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
                 X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model!="GFS" else load_gfs(url,valid,REGIONS[region],parameter)
