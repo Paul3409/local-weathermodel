@@ -21,7 +21,12 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "mslp-vivid-readable-ticks-v2"
+MAP_STYLE_VERSION = "germany-surface-v1"
+SURFACE_FIELDS = {"2-m-Temperatur":"t_2m","Windböen":"vmax_10m","Niederschlagsrate":"tot_prec","Niederschlagssumme":"tot_prec"}
+TEMP_STOPS = [(-20,"#9851BD"),(-15,"#4C207F"),(-10,"#16346E"),(-5,"#3377C6"),(0,"#B8E5F4"),(.4999,"#B8E5F4"),(.5,"#174C35"),(5,"#438A49"),(10,"#A9C64D"),(15,"#F0D64B"),(20,"#F5B16C")]
+GUST_STOPS = [(0,"#499FE1"),(10,"#204D99"),(20,"#347B4A"),(30,"#A3BE4B"),(40,"#E8D24A"),(50,"#F3A143"),(60,"#E96A38"),(70,"#DB3834"),(80,"#B9252E"),(90,"#811A2C"),(100,"#48205F"),(110,"#853AA8"),(120,"#C52D9A")]
+PREC_RATE = [(0,"#F2F5F7"),(.1,"#C8EAF7"),(.5,"#80C9EC"),(1,"#368DD1"),(2,"#2269A9"),(5,"#3B9A68"),(10,"#C4C948"),(15,"#F1D34E"),(20,"#F3A04A"),(30,"#E85A38"),(50,"#C72F43"),(75,"#83215F"),(100,"#C137A8")]
+PREC_SUM = [(0,"#F2F5F7"),(.5,"#D1F2ED"),(1,"#91DCD8"),(2,"#51B9D4"),(5,"#3787C1"),(10,"#2465A0"),(15,"#3D986A"),(20,"#A8C34E"),(30,"#E6D14B"),(40,"#F1A24D"),(50,"#E46840"),(75,"#C43D53"),(100,"#793A94")]
 
 class Links(HTMLParser):
     def __init__(self):
@@ -43,6 +48,8 @@ def discover(run, variable):
     for name in parser.names:
         lower=name.lower()
         if not lower.endswith(".grib2.bz2") or stamp not in lower:
+            continue
+        if variable in SURFACE_FIELDS.values() and variable not in lower:
             continue
         if variable=="pmsl" and "single-level" not in lower:
             continue
@@ -114,10 +121,17 @@ def load_grid(url, valid, bounds, variable):
                         vals=vals/100.0
                         if not 850<np.nanmedian(vals)<1100:
                             raise RuntimeError("MSLP-Einheiten unerwartet; Karte nicht erstellt.")
-                    else:
+                    elif variable in ("t","t_2m"):
                         vals=vals-273.15
                         if not -100<np.nanmedian(vals)<60:
-                            raise RuntimeError("T850-Einheiten unerwartet; Karte nicht erstellt.")
+                            raise RuntimeError("Temperatur-Einheiten unerwartet; Karte nicht erstellt.")
+                    elif variable=="vmax_10m":
+                        vals=vals*3.6
+                        if not 0<=np.nanmedian(vals)<250:
+                            raise RuntimeError("Windböen-Einheiten unerwartet; Karte nicht erstellt.")
+                    elif variable=="tot_prec":
+                        if not 0<=np.nanmedian(vals)<2000:
+                            raise RuntimeError("Niederschlagswerte unplausibel; Karte nicht erstellt.")
                     from scipy.interpolate import griddata
                     nx,ny=(225,180) if bounds==REGIONS["Deutschland"] else (300,220)
                     x=np.linspace(west,east,nx)
