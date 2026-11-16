@@ -138,18 +138,40 @@ def load_grid(url, valid, bounds, variable):
                 if gid is None:
                     break
                 try:
-                    date=int(codes_get(gid,"validityDate"))
-                    time=int(codes_get(gid,"validityTime"))
-                    timestamp=datetime.strptime(f"{date:08d}{time:04d}","%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+                    # Some ICON-D2 GRIB templates omit computed validity keys.
+                    # Fall back to reference time plus forecast step.
+                    try:
+                        date=int(codes_get(gid,"validityDate"))
+                        time=int(codes_get(gid,"validityTime"))
+                        timestamp=datetime.strptime(f"{date:08d}{time:04d}","%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+                    except Exception as validity_error:
+                        try:
+                            date=int(codes_get(gid,"dataDate"))
+                            time=int(codes_get(gid,"dataTime"))
+                            step=int(codes_get(gid,"endStep"))
+                            reference=datetime.strptime(f"{date:08d}{time:04d}","%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+                            timestamp=reference+timedelta(hours=step)
+                        except Exception as fallback_error:
+                            raise RuntimeError(
+                                f"GRIB-Zeitmetadaten fehlen für {variable}: "
+                                f"validityDate/validityTime ({validity_error}); "
+                                f"dataDate/dataTime/endStep ({fallback_error})"
+                            ) from fallback_error
                     if abs((timestamp-valid).total_seconds())>60:
                         continue
                     if variable in ("t","fi"):
                         level=int(codes_get(gid,"level"))
                         if level!=(850 if variable=="t" else 500):
                             continue
-                    lat=np.asarray(codes_get_array(gid,"latitudes"))
-                    lon=np.asarray(codes_get_array(gid,"longitudes"))
-                    vals=np.asarray(codes_get_array(gid,"values"))
+                    try:
+                        lat=np.asarray(codes_get_array(gid,"latitudes"))
+                        lon=np.asarray(codes_get_array(gid,"longitudes"))
+                        vals=np.asarray(codes_get_array(gid,"values"))
+                    except Exception as grid_error:
+                        raise RuntimeError(
+                            f"GRIB-Gitterdaten für {variable} nicht lesbar "
+                            f"(latitudes/longitudes/values): {grid_error}"
+                        ) from grid_error
                     lon=np.where(lon>180,lon-360,lon)
                     west,east,south,north=bounds
                     mask=(lon>=west-.5)&(lon<=east+.5)&(lat>=south-.5)&(lat<=north+.5)
