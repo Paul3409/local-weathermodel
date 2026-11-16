@@ -636,18 +636,7 @@ def show(region):
                                 v_files=getfiles(run,"v_10m")
                             except requests.RequestException: continue
                             if lead not in u_files or lead not in v_files: continue
-                        if parameter=="Windchill":
-                    if model=="GFS":
-                        u_url=discover_gfs(run,"Windchill-U",REGIONS[region])[lead]
-                        v_url=discover_gfs(run,"Windchill-V",REGIONS[region])[lead]
-                        _,_,u=load_gfs(u_url,valid,REGIONS[region],"Windchill-U")
-                        _,_,v=load_gfs(v_url,valid,REGIONS[region],"Windchill-V")
-                    else:
-                        getfiles=discover_d2 if model=="ICON-D2" else discover
-                        _,_,u=load_grid(getfiles(run,"u_10m")[lead],valid,REGIONS[region],"u_10m")
-                        _,_,v=load_grid(getfiles(run,"v_10m")[lead],valid,REGIONS[region],"v_10m")
-                    Z=windchill_celsius(Z,u,v)
-                if parameter=="Neuschneemenge" and model!="GFS":
+                        if parameter=="Neuschneemenge" and model!="GFS":
                             try: extra=discover_d2(run,"snow_con") if model=="ICON-D2" else discover(run,"snow_con")
                             except requests.RequestException: continue
                             if lead not in extra: continue
@@ -673,6 +662,17 @@ def show(region):
                 run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
                 X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model!="GFS" else load_gfs(url,valid,REGIONS[region],parameter)
+                if parameter=="Windchill":
+                    if model=="GFS":
+                        u_url=discover_gfs(run,"Windchill-U",REGIONS[region])[lead]
+                        v_url=discover_gfs(run,"Windchill-V",REGIONS[region])[lead]
+                        _,_,u=load_gfs(u_url,valid,REGIONS[region],"Windchill-U")
+                        _,_,v=load_gfs(v_url,valid,REGIONS[region],"Windchill-V")
+                    else:
+                        getfiles=discover_d2 if model=="ICON-D2" else discover
+                        _,_,u=load_grid(getfiles(run,"u_10m")[lead],valid,REGIONS[region],"u_10m")
+                        _,_,v=load_grid(getfiles(run,"v_10m")[lead],valid,REGIONS[region],"v_10m")
+                    Z=windchill_celsius(Z,u,v)
                 if parameter=="Neuschneemenge" and model!="GFS":
                     extra=discover_d2(run,"snow_con") if model=="ICON-D2" else discover(run,"snow_con")
                     _,_,convective=load_grid(extra[lead],valid,REGIONS[region],"snow_con")
