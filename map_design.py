@@ -64,22 +64,22 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
     """Professional navy frame. All weather values and palette colors stay intact."""
     from zoneinfo import ZoneInfo
     raw = Image.open(io.BytesIO(data)).convert("RGB")
-    # Every exported weather map uses a genuine 16:9 canvas.
+    # Every exported weather map uses a genuine 4:3 canvas.
     # Contain the complete map image (never crop or stretch geographic data).
     width = 1600
-    height = 900
+    height = 1200
     scale = width / 1100.0
     u = lambda n: max(1, round(n * scale))
     margin = u(16)
-    top = u(201)
+    top = u(194)
     is_weather = "Signifikantes Wetter" in str(parameter)
     legend_h = u(145) if is_weather else 0
-    footer_h = u(62)
-    map_bottom = height - footer_h - legend_h - u(12)
+    footer_h = u(58)
+    map_bottom = height - footer_h - legend_h - u(6)
     max_map_w = width - 2 * margin
     max_map_h = map_bottom - top
     if max_map_h <= 0:
-        raise RuntimeError("Ungültiges 16:9-Kartenlayout.")
+        raise RuntimeError("Ungültiges 4:3-Kartenlayout.")
     raw.thumbnail((max_map_w,max_map_h),Image.Resampling.LANCZOS)
     canvas = Image.new("RGB", (width, height), NAVY)
     d = ImageDraw.Draw(canvas)
