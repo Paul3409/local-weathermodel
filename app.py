@@ -602,7 +602,7 @@ if parameter_page == '🌡️ Temperatur':
       st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
   else:
       st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
-  enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
+  enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=not krumet_mode, disabled=krumet_mode)
 else:
     enable_landuse = False
     if is_gust:
