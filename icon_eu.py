@@ -24,7 +24,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "z500-552-d2-v1"
+MAP_STYLE_VERSION = "snow-v1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -33,7 +33,7 @@ def previous_eu_lead(lead):
     if lead<=78:
         return lead-1
     return lead-3
-SURFACE_FIELDS = {"2-m-Temperatur":"t_2m","Windböen":"vmax_10m","Niederschlagsrate":"tot_prec","Niederschlagssumme":"tot_prec","Taupunkt":"td_2m","Signifikantes Wetter":"ww"}
+SURFACE_FIELDS = {"2-m-Temperatur":"t_2m","Windböen":"vmax_10m","Niederschlagsrate":"tot_prec","Niederschlagssumme":"tot_prec","Taupunkt":"td_2m","Signifikantes Wetter":"ww","Schneehöhe":"h_snow"}
 PHASE_COMPONENTS=("rain_gsp","rain_con","snow_gsp","snow_con")
 PHASE_COLORS=["#F2F5F7","#278DCE","#F39A43","#F4A4CF","#8C949F"]
 PHASE_LABELS=["Trocken","Regen","Schneeregen","Schnee","Unklar"]
@@ -63,7 +63,7 @@ def discover(run, variable):
         lower=name.lower()
         if not lower.endswith(".grib2.bz2") or stamp not in lower:
             continue
-        if variable in SURFACE_FIELDS.values() or variable in PHASE_COMPONENTS:
+        if variable in SURFACE_FIELDS.values() or variable in PHASE_COMPONENTS or variable in ("snow_gsp","snow_con"):
             if variable not in lower:
                 continue
         if variable=="pmsl" and "single-level" not in lower:
@@ -262,6 +262,9 @@ def load_grid(url, valid, bounds, variable):
                         vals=vals*3.6
                         if not 0<=np.nanmedian(vals)<250:
                             raise RuntimeError("Windböen-Einheiten unerwartet; Karte nicht erstellt.")
+                    elif variable=="h_snow":
+                        vals=vals*100.0
+                        if not 0<=np.nanmedian(vals)<2000: raise RuntimeError("Schneehöhe außerhalb plausibler Werte.")
                     elif variable=="tot_prec" or variable in PHASE_COMPONENTS:
                         if not 0<=np.nanmedian(vals)<2000:
                             raise RuntimeError("Niederschlagswerte unplausibel; Karte nicht erstellt.")
@@ -294,6 +297,8 @@ GFS_FIELDS={
     "2-m-Temperatur":("TMP","2_m_above_ground"),
     "Taupunkt":("DPT","2_m_above_ground"),
     "Windböen":("GUST","surface"),
+    "Schneehöhe":("SNOD","surface"),
+    "Neuschneemenge":("ASNOW","surface"),
 }
 @st.cache_data(ttl=600,show_spinner=False)
 def discover_gfs(run,parameter,bounds):
@@ -351,6 +356,7 @@ def load_gfs(url,valid,bounds,parameter):
                     elif parameter in ("T850","2-m-Temperatur","Taupunkt"):vals=vals-273.15
                     elif parameter=="Z500 + MSLP":vals=vals/10
                     elif parameter=="Windböen":vals=vals*3.6
+                    elif parameter in ("Schneehöhe","Neuschneemenge"):vals=vals*100.0
                     if not np.isfinite(vals).all():raise RuntimeError("GFS-Feld enthält fehlende Werte.")
                     if parameter=="Z500 + MSLP" and not 400<np.median(vals)<650:raise RuntimeError("GFS-Z500 unplausibel.")
                     if parameter=="MSLP" and not 850<np.median(vals)<1100:raise RuntimeError("GFS-MSLP unplausibel.")
@@ -368,12 +374,37 @@ def load_gfs(url,valid,bounds,parameter):
         if path and os.path.exists(path):os.unlink(path)
     raise RuntimeError("GFS-GRIB-Datei enthält kein Feld mit der angeforderten Gültigkeitszeit.")
 
+SNOW_STOPS=[(0.1,"#1BC33A"),(0.5,"#D8F6FC"),(1,"#A5E8F8"),(2,"#6DCEEF"),(5,"#339EDB"),(10,"#1765B9"),(20,"#5949BA"),(30,"#9853C8"),(50,"#D95AB6"),(75,"#EF779A"),(100,"#F7C7DF"),(150,"#FFFFFF")]
+def snow_water_mask(X,Y):
+    """Rasterize actual land polygons; ocean and lakes outside polygons remain blue."""
+    from rasterio.features import rasterize
+    from rasterio.transform import from_bounds
+    # Geo-countries covers land only; this is a land/sea mask, not an inland-lake inventory.
+    geo=borders(COUNTRIES)
+    geoms=[(f["geometry"],1) for f in geo.get("features",[]) if f.get("geometry")]
+    ny,nx=X.shape
+    transform=from_bounds(float(X.min()),float(Y.min()),float(X.max()),float(Y.max()),nx,ny)
+    return np.flipud(rasterize(geoms,out_shape=(ny,nx),transform=transform,fill=0,dtype="uint8"))==0
+
 def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     bounds=REGIONS[region]
     # A slightly shorter canvas for WW maps; preserve the full geographic extent and native data grid.
     fig,ax=plt.subplots(figsize=(9,7.25 if parameter=="Signifikantes Wetter" else 8),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
-    if parameter=="Z500 + MSLP":
+    if parameter in ("Neuschneemenge","Schneehöhe"):
+        from matplotlib.colors import ListedColormap, BoundaryNorm
+        edges=[0,.1,.5,1,2,5,10,20,30,50,75,100,150,10000]
+        colors=[c for _,c in SNOW_STOPS]
+        colors.append("#FFFFFF")
+        cmap=ListedColormap(colors)
+        norm=BoundaryNorm(edges,cmap.N)
+        im=ax.pcolormesh(X,Y,np.maximum(Z,0),cmap=cmap,norm=norm,shading="nearest",rasterized=True)
+        # Water blue is a geographic background category, never a snow measurement.
+        from matplotlib.colors import ListedColormap as _Listed
+        water=snow_water_mask(X,Y)
+        ax.pcolormesh(X,Y,np.ma.masked_where(~water,np.ones(Z.shape)),cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
+        label="Schneehöhe (cm)" if parameter=="Schneehöhe" else "Berechnete Neuschneehöhe seit Modellstart (cm; 10:1-Schätzung bei ICON)"
+    elif parameter=="Z500 + MSLP":
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         if mslp is None or mslp.shape!=Z.shape: raise RuntimeError("MSLP-Raster fehlt.")
         anchors=[(480,"#65058C"),(490,"#8500F4"),(500,"#0033E9"),(510,"#008FF7"),
@@ -513,6 +544,8 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
     if parameter=="Signifikantes Wetter":
         pass
+    elif parameter in ("Neuschneemenge","Schneehöhe"):
+        cb.set_ticks([.1,1,5,10,20,30,50,75,100,150])
     elif parameter=="Z500 + MSLP":
         cb.set_ticks(np.arange(480,601,10))
     elif parameter=="T850":
@@ -539,7 +572,12 @@ def show(region):
     st.caption("ICON-D2: Deutschland bis +48 h stündlich (sofern die DWD-Dateien verfügbar sind). ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
     choices=(["MSLP","T850","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","Z500 + MSLP"])
+    choices += ["Neuschneemenge","Schneehöhe"]
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
+    if parameter=="Neuschneemenge":
+        st.caption("ICON: aus akkumuliertem Schneewasseräquivalent (SNOW_GSP + SNOW_CON), 10:1-Umrechnung; Schätzung, keine prognostizierte Schneedeckenänderung. GFS: akkumulierte Schneefallhöhe (ASNOW), falls verfügbar.")
+    elif parameter=="Schneehöhe":
+        st.caption("Schneedecke zum Gültigkeitszeitpunkt: ICON H_SNOW / GFS SNOD; nicht der seit Modellstart gefallene Schnee.")
     now_preview=datetime.now(timezone.utc)
     preview_run=now_preview.replace(minute=0,second=0,microsecond=0)
     preview_run=preview_run.replace(hour=(preview_run.hour//6)*6)
@@ -560,7 +598,7 @@ def show(region):
                     run=run.replace(hour=(run.hour//3)*3)
                     if run not in runs and (model=="GFS" or model=="ICON-D2" or lead<=78 or run.hour in (0,6,12,18)) and (model!="GFS" or run.hour in (0,6,12,18)):
                         runs.append(run)
-                variable="pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else ("fi" if parameter=="Z500 + MSLP" else SURFACE_FIELDS[parameter]))
+                variable="snow_gsp" if parameter=="Neuschneemenge" else ("pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else ("fi" if parameter=="Z500 + MSLP" else SURFACE_FIELDS.get(parameter,"t_2m"))))
                 selected=None
                 for run in runs:
                     try:
@@ -570,6 +608,10 @@ def show(region):
                     previous_lead=previous_eu_lead(lead)
                     required=[previous_lead,lead] if parameter=="Niederschlagsrate" and previous_lead is not None else [lead]
                     if all(hour in available for hour in required):
+                        if parameter=="Neuschneemenge" and model!="GFS":
+                            try: extra=discover_d2(run,"snow_con") if model=="ICON-D2" else discover(run,"snow_con")
+                            except requests.RequestException: continue
+                            if lead not in extra: continue
                         if parameter=="Z500 + MSLP" and model!="GFS":
                             try: pressure_files=discover_d2(run,"pmsl") if model=="ICON-D2" else discover(run,"pmsl")
                             except requests.RequestException: continue
@@ -588,6 +630,11 @@ def show(region):
                 run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
                 X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model!="GFS" else load_gfs(url,valid,REGIONS[region],parameter)
+                if parameter=="Neuschneemenge" and model!="GFS":
+                    extra=discover_d2(run,"snow_con") if model=="ICON-D2" else discover(run,"snow_con")
+                    _,_,convective=load_grid(extra[lead],valid,REGIONS[region],"snow_con")
+                    # Both components are accumulated mm water equivalent. 10:1 -> cm snow.
+                    Z=np.maximum(Z+convective,0)
                 if parameter=="Niederschlagsrate":
                     if lead==0:
                         Z=np.zeros_like(Z)
