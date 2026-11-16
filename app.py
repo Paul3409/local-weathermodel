@@ -200,6 +200,18 @@ def downscale_temperature(Z, terrain, lapse_rate=0.0065):
     return Z+correction, correction
 
 
+def krumet_cold_air_diagnostic(terrain, valid, u, v, cloud):
+    """Heuristic nocturnal cold-air potential; not a validated forecast."""
+    hour = valid.astimezone(TZ).hour
+    night = max(0., np.cos((hour-3)*np.pi/12))
+    dy = (LAT_MAX-LAT_MIN)*111200/(terrain.shape[0]-1)
+    dx = (LON_MAX-LON_MIN)*111200*math.cos(math.radians((LAT_MIN+LAT_MAX)/2))/(terrain.shape[1]-1)
+    valley = np.clip((gaussian_filter(terrain,(10000/dy,10000/dx))-terrain)/100,0,1)
+    calm = np.clip((18-np.hypot(u,v)*3.6)/15,0,1)
+    clear = np.clip((85-cloud)/70,0,1)
+    return -1.5*night*valley*calm*clear
+
+
 # ESA WorldCover 2021 v200: 10-m land cover, sampled to the forecast grid.
 # Local classes: 0 unknown, 1 trees/shrub, 2 crops/grass, 3 bare,
 # 4 built-up, 5 water/wetland. These are NOT OSM polygon counts.
@@ -616,7 +628,7 @@ if krumet_mode:
     LAT_MIN, LAT_MAX = 50.0, 52.2
     LON_MIN, LON_MAX = 11.5, 15.4
     PLACES = {'Leipzig': (51.340, 12.375), 'Dresden': (51.051, 13.738), 'Chemnitz': (50.833, 12.925), 'Zwickau': (50.718, 12.493), 'Görlitz': (51.156, 14.989), 'Bautzen': (51.181, 14.429), 'Belgern': (51.483, 13.125), 'Mühlberg': (51.434, 13.222), 'Cottbus': (51.760, 14.335), 'Altenburg': (50.985, 12.434)}
-    st.subheader('🔬 KRUMET v0.2 | Sachsen und Umgebung')
+    st.subheader('🔬 KRUMET v0.3 | Sachsen und Umgebung')
     st.caption('Gebiet: 50,0–52,2°N / 11,5–15,4°O. Experimentelle ICON-D2-Geländekorrektur; WorldCover für das größere Gebiet noch nicht verfügbar.')
 else:
     st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
@@ -689,6 +701,17 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     st.code('\n'.join(diagnostics))
                 raise RuntimeError(f'Kein ICON-D2-Lauf mit allen Stunden +{start_hour} bis +{end_hour} gefunden. Siehe DWD-Diagnose oben.')
             run, files, hours = selected
+            krumet_met_files = {}
+            if krumet_mode:
+                for p in ('u_10m','v_10m','clct'):
+                    try:
+                        found,_,_ = list_run(run,p)
+                        if all(h in found for h in hours):
+                            krumet_met_files[p] = found
+                    except requests.RequestException:
+                        pass
+                if len(krumet_met_files)<3:
+                    st.warning('Wind-/Bewölkungsdaten fehlen teilweise: KRUMET verwendet dann nur die Höhenkorrektur.')
             if is_precip:
                 hours = list(range(max(0,start_hour-1),end_hour+1)) if parameter_page == '🌧️ Rate' else list(range(start_hour,end_hour+1))
                 if any(h not in files for h in hours):
@@ -832,7 +855,21 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 diff_png = None
                 if terrain is not None:
                     local, correction = downscale_temperature(Z, terrain)
-                    local_png = (render_png(X,Y,local,run,msg[3],mode='KRUMET · Höhenkorrektur',correction=correction,model_name='KRUMET'),)*2 if krumet_mode else tuple(render_png(X,Y,local,run,msg[3],mode='Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag) for flag in (False,True))
+                    if krumet_mode and len(krumet_met_files)==3:
+                        try:
+                            met = {}
+                            for p in ('u_10m','v_10m','clct'):
+                                records = decode_grib(krumet_met_files[p][hour],p)
+                                record = min(records,key=lambda m:abs((m[3]-target).total_seconds()))
+                                if abs((record[3]-target).total_seconds())>60:
+                                    raise ValueError(f'Zeitstempel {p} fehlt')
+                                met[p] = interpolate(*record[:3])[2]
+                            cold = krumet_cold_air_diagnostic(terrain,msg[3],met['u_10m'],met['v_10m'],met['clct'])
+                            local += cold
+                            correction += cold
+                        except (requests.RequestException,ValueError,RuntimeError) as exc:
+                            st.warning(f'KRUMET +{hour} h: Kaltluftdiagnostik ausgefallen ({exc}).')
+                    local_png = (render_png(X,Y,local,run,msg[3],mode='KRUMET · Gelände + Kaltluft',correction=correction,model_name='KRUMET'),)*2 if krumet_mode else tuple(render_png(X,Y,local,run,msg[3],mode='Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag) for flag in (False,True))
                     if landuse is not None:
                         lu_corr = landuse_temperature_correction(landuse, msg[3])
                         combined = local + lu_corr
