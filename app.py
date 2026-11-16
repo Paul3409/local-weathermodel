@@ -471,9 +471,8 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
     if parameter_page == '🌦️ Signifikantes Wetter':
         cmap,norm,bounds=palette()
         filled=ax.pcolormesh(X,Y,Z,cmap=cmap,norm=norm,shading="nearest",rasterized=True)
-        fig.subplots_adjust(bottom=.25)
-        fig.legend(handles=legend_handles(),loc="lower center",ncol=4,fontsize=6,
-                   frameon=False,bbox_to_anchor=(.5,.035),columnspacing=.8,handlelength=1.4)
+        # The grouped WW legend is drawn by the shared navy frame.
+        fig.subplots_adjust(left=.11,right=.97,top=.95,bottom=.10)
     else:
         stops=PREC_RATE if parameter_page=='🌧️ Rate' else PREC_SUM
         vmax=100
@@ -506,6 +505,9 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
     fig.suptitle('ELBTAL  |  '+parameter_page,fontsize=16,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 · Lauf {run:%d.%m.%Y %H:%M} UTC · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=8,pad=12)
     fig.text(.5,.025,'DWD ICON-D2 · Modellwerte, keine Messungen',ha='center',fontsize=8,color='#48566a')
+    if parameter_page == '🌦️ Signifikantes Wetter':
+        fig.suptitle('')
+        ax.set_title('')
     style_figure(fig, ax)
     out = io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
