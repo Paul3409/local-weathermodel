@@ -227,7 +227,7 @@ def load_grid(url, valid, bounds, variable):
                             ) from grid_error
                         # Native ICON-D2 GRIB (unstructured grid) has no embedded lat/lon.
                         # The DWD CLAT/CLON time-invariant fields share the value order.
-                        stamp_match=re.search(r"_(\\d{10})_\\d{3}(?:_|\\.)",url)
+                        stamp_match=re.search(r"_(\d{10})_\d{3}(?:_|\.)",url)
                         if not stamp_match:
                             raise RuntimeError("ICON-D2-Modelllauf im Dateinamen nicht erkennbar.")
                         model_run=datetime.strptime(stamp_match.group(1),"%Y%m%d%H").replace(tzinfo=timezone.utc)
