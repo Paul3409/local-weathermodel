@@ -719,120 +719,121 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     raise RuntimeError('Keine Viertelstundenkarten vorhanden.')
                 st.session_state[IMAGE_KEYS[parameter_page]] = quarter_images
                 status.update(label='15-Minuten-Karten erstellt',state='complete')
-                st.stop()
-            for idx, hour in enumerate(hours):
-                st.write(f'Lade Daten +{hour} h ({idx+1}/{len(hours)}) …')
-                messages = decode_grib(files[hour], 'tot_prec' if is_precip else ('td_2m' if is_dew or is_fog else ('vmax_10m' if is_gust else 't_2m')))
-                # Select the exact hourly forecast time, never a neighboring quarter-hour.
-                target = run + timedelta(hours=hour)
-                msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
-                if abs((msg[3]-target).total_seconds()) > 60:
-                    raise RuntimeError(f'Kein exakter Prognosezeitpunkt für +{hour} h vorhanden.')
-                X, Y, Z = interpolate(*msg[:3],grid_m=500 if is_fog else None)
-                if is_precip:
-                    if is_kind:
-                        increments = {}
-                        for component,component_files in phase_files.items():
-                            component_messages = decode_grib(component_files[hour],component)
-                            component_msg = min(component_messages,key=lambda m: abs((m[3]-target).total_seconds()))
-                            if abs((component_msg[3]-target).total_seconds()) > 60:
-                                raise RuntimeError(f'Zeitstempel stimmt nicht: {component} +{hour} h.')
-                            _,_,component_grid = interpolate(*component_msg[:3])
-                            if component in phase_previous:
-                                increments[component] = np.maximum(component_grid-phase_previous[component],0)
-                            else:
-                                increments[component] = np.zeros_like(component_grid)
-                            phase_previous[component] = component_grid
-                    # TOT_PREC is the accumulated water equivalent since model initialization.
-                    # Each hourly difference is a one-hour mean rate in mm/h.
-                    if not np.isfinite(Z).all():
-                        raise RuntimeError('Ungültige Niederschlagswerte im Modellfeld.')
-                    Z = np.maximum(Z,0)
-                    if precip_previous is None:
-                        hourly = np.zeros_like(Z)
-                    else:
-                        if np.nanmin(Z-precip_previous) < -.1:
-                            raise RuntimeError('Niederschlagsakkumulation fällt unerwartet ab; Daten prüfen.')
-                        hourly = np.maximum(Z-precip_previous,0)
-                    precip_previous = Z.copy()
-                    if hour < start_hour:
-                        continue
-                    display = hourly if parameter_page == '🌧️ Rate' else Z
-                    if is_kind:
-                        # Separate rain/snow components are needed; no temperature-only guessing.
-                        display = classify_precipitation(hourly,
-                            increments['rain_gsp']+increments['rain_con'],
-                            increments['snow_gsp']+increments['snow_con'],
-                            increments['grau_gsp'])
-                        original_png = (render_precip(X,Y,display,run,msg[3],parameter_page),)*2
-                    else:
-                        original_png = tuple(render_precip(X,Y,display,run,msg[3],parameter_page,flag) for flag in (False,True))
-                elif is_fog:
-                    def load_fog_field(parameter):
-                        records=decode_grib(fog_files[parameter][hour],parameter)
-                        record=min(records,key=lambda m: abs((m[3]-target).total_seconds()))
-                        if abs((record[3]-target).total_seconds())>60:
-                            raise RuntimeError(f'Zeitstempel für {parameter} +{hour} h fehlt.')
-                        return interpolate(*record[:3],grid_m=500)[2]
-                    t2m=load_fog_field('t_2m')
-                    u10=load_fog_field('u_10m')
-                    v10=load_fog_field('v_10m')
-                    wind=np.hypot(u10,v10)*3.6
-                    spread=np.maximum(t2m-Z,0)
-                    # Diagnostic indicator, not a probability or actual fog visibility.
-                    score=np.clip((2.5-spread)/2.5,0,1)*np.clip((18-wind)/15,0,1)
-                    categories=np.zeros(Z.shape,dtype=int)
-                    categories[score>=.2]=1
-                    categories[score>=.45]=2
-                    categories[score>=.7]=3
-                    # CLCL is low-level cloud fraction, not proof of fog at ground level.
-                    if 'clcl' in fog_cloud_files:
-                        try:
-                            cloud_records=decode_grib(fog_cloud_files['clcl'][hour],'clcl')
-                            cloud_record=min(cloud_records,key=lambda m:abs((m[3]-target).total_seconds()))
-                            if abs((cloud_record[3]-target).total_seconds())<=60:
-                                low_cloud=interpolate(*cloud_record[:3],grid_m=500)[2]
-                                # Strong low-cloud cover with nearly saturated air: retain a fog/high-stratus signal.
-                                categories[(low_cloud>=70)&(spread<=1.5)&(wind<=12)] = np.maximum(categories[(low_cloud>=70)&(spread<=1.5)&(wind<=12)],2)
-                        except (requests.RequestException,ValueError,RuntimeError) as cloud_error:
-                            st.warning(f'Tiefe Bewölkung +{hour} h nicht verarbeitet: {cloud_error}. Basisindikator bleibt aktiv.')
-                    # Distinguish precipitation-associated saturation from fog-favourable conditions.
-                    if fog_precip_files and hour>0:
-                        def fog_accumulation(lead):
-                            records=decode_grib(fog_precip_files[lead],'tot_prec')
-                            expected=run+timedelta(hours=lead)
-                            record=min(records,key=lambda m:abs((m[3]-expected).total_seconds()))
-                            if abs((record[3]-expected).total_seconds())>60:
-                                raise RuntimeError(f'Kein exakter Niederschlagszeitpunkt +{lead} h.')
-                            return np.maximum(interpolate(*record[:3],grid_m=500)[2],0)
-                        current_accum=fog_accumulation(hour)
-                        if fog_precip_previous_hour==hour-1:
-                            previous_accum=fog_precip_previous
+            if not quarter_mode:
+                for idx, hour in enumerate(hours):
+                    st.write(f'Lade Daten +{hour} h ({idx+1}/{len(hours)}) …')
+                    messages = decode_grib(files[hour], 'tot_prec' if is_precip else ('td_2m' if is_dew or is_fog else ('vmax_10m' if is_gust else 't_2m')))
+                    # Select the exact hourly forecast time, never a neighboring quarter-hour.
+                    target = run + timedelta(hours=hour)
+                    msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
+                    if abs((msg[3]-target).total_seconds()) > 60:
+                        raise RuntimeError(f'Kein exakter Prognosezeitpunkt für +{hour} h vorhanden.')
+                    X, Y, Z = interpolate(*msg[:3],grid_m=500 if is_fog else None)
+                    if is_precip:
+                        if is_kind:
+                            increments = {}
+                            for component,component_files in phase_files.items():
+                                component_messages = decode_grib(component_files[hour],component)
+                                component_msg = min(component_messages,key=lambda m: abs((m[3]-target).total_seconds()))
+                                if abs((component_msg[3]-target).total_seconds()) > 60:
+                                    raise RuntimeError(f'Zeitstempel stimmt nicht: {component} +{hour} h.')
+                                _,_,component_grid = interpolate(*component_msg[:3])
+                                if component in phase_previous:
+                                    increments[component] = np.maximum(component_grid-phase_previous[component],0)
+                                else:
+                                    increments[component] = np.zeros_like(component_grid)
+                                phase_previous[component] = component_grid
+                        # TOT_PREC is the accumulated water equivalent since model initialization.
+                        # Each hourly difference is a one-hour mean rate in mm/h.
+                        if not np.isfinite(Z).all():
+                            raise RuntimeError('Ungültige Niederschlagswerte im Modellfeld.')
+                        Z = np.maximum(Z,0)
+                        if precip_previous is None:
+                            hourly = np.zeros_like(Z)
                         else:
-                            previous_accum=fog_accumulation(hour-1)
-                        hourly_rain=np.maximum(current_accum-previous_accum,0)
-                        categories[hourly_rain>=0.1]=4
-                        fog_precip_previous=current_accum
-                        fog_precip_previous_hour=hour
-                    original_png=(render_fog(X,Y,categories,run,msg[3]),)*2
-                elif is_dew:
-                    original_png=tuple(render_png(X,Y,Z,run,msg[3],mode='ICON-D2 Taupunkt · keine lokale Korrektur',show_km_values=flag) for flag in (False,True))
-                else:
-                    original_png = (render_gust(X,Y,Z,run,msg[3]), render_gust(X,Y,Z,run,msg[3],show_km_values=True)) if is_gust else (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True))
-                local_png = None
-                combined_png = None
-                diff_png = None
-                if terrain is not None:
-                    local, correction = downscale_temperature(Z, terrain)
-                    local_png = tuple(render_png(X,Y,local,run,msg[3],mode='Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag) for flag in (False,True))
-                    if landuse is not None:
-                        lu_corr = landuse_temperature_correction(landuse, msg[3])
-                        combined = local + lu_corr
-                        combined_png = tuple(render_png(X,Y,combined,run,msg[3],mode='Höhe + WorldCover-Landnutzung · experimentell',correction=combined-Z,show_km_values=flag) for flag in (False,True))
-                        diff_png = render_difference(X, Y, combined-Z, run, msg[3])
-                images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
-            st.session_state[IMAGE_KEYS[parameter_page]] = images
-            status.update(label='Karten erstellt', state='complete')
+                            if np.nanmin(Z-precip_previous) < -.1:
+                                raise RuntimeError('Niederschlagsakkumulation fällt unerwartet ab; Daten prüfen.')
+                            hourly = np.maximum(Z-precip_previous,0)
+                        precip_previous = Z.copy()
+                        if hour < start_hour:
+                            continue
+                        display = hourly if parameter_page == '🌧️ Rate' else Z
+                        if is_kind:
+                            # Separate rain/snow components are needed; no temperature-only guessing.
+                            display = classify_precipitation(hourly,
+                                increments['rain_gsp']+increments['rain_con'],
+                                increments['snow_gsp']+increments['snow_con'],
+                                increments['grau_gsp'])
+                            original_png = (render_precip(X,Y,display,run,msg[3],parameter_page),)*2
+                        else:
+                            original_png = tuple(render_precip(X,Y,display,run,msg[3],parameter_page,flag) for flag in (False,True))
+                    elif is_fog:
+                        def load_fog_field(parameter):
+                            records=decode_grib(fog_files[parameter][hour],parameter)
+                            record=min(records,key=lambda m: abs((m[3]-target).total_seconds()))
+                            if abs((record[3]-target).total_seconds())>60:
+                                raise RuntimeError(f'Zeitstempel für {parameter} +{hour} h fehlt.')
+                            return interpolate(*record[:3],grid_m=500)[2]
+                        t2m=load_fog_field('t_2m')
+                        u10=load_fog_field('u_10m')
+                        v10=load_fog_field('v_10m')
+                        wind=np.hypot(u10,v10)*3.6
+                        spread=np.maximum(t2m-Z,0)
+                        # Diagnostic indicator, not a probability or actual fog visibility.
+                        score=np.clip((2.5-spread)/2.5,0,1)*np.clip((18-wind)/15,0,1)
+                        categories=np.zeros(Z.shape,dtype=int)
+                        categories[score>=.2]=1
+                        categories[score>=.45]=2
+                        categories[score>=.7]=3
+                        # CLCL is low-level cloud fraction, not proof of fog at ground level.
+                        if 'clcl' in fog_cloud_files:
+                            try:
+                                cloud_records=decode_grib(fog_cloud_files['clcl'][hour],'clcl')
+                                cloud_record=min(cloud_records,key=lambda m:abs((m[3]-target).total_seconds()))
+                                if abs((cloud_record[3]-target).total_seconds())<=60:
+                                    low_cloud=interpolate(*cloud_record[:3],grid_m=500)[2]
+                                    # Strong low-cloud cover with nearly saturated air: retain a fog/high-stratus signal.
+                                    categories[(low_cloud>=70)&(spread<=1.5)&(wind<=12)] = np.maximum(categories[(low_cloud>=70)&(spread<=1.5)&(wind<=12)],2)
+                            except (requests.RequestException,ValueError,RuntimeError) as cloud_error:
+                                st.warning(f'Tiefe Bewölkung +{hour} h nicht verarbeitet: {cloud_error}. Basisindikator bleibt aktiv.')
+                        # Distinguish precipitation-associated saturation from fog-favourable conditions.
+                        if fog_precip_files and hour>0:
+                            def fog_accumulation(lead):
+                                records=decode_grib(fog_precip_files[lead],'tot_prec')
+                                expected=run+timedelta(hours=lead)
+                                record=min(records,key=lambda m:abs((m[3]-expected).total_seconds()))
+                                if abs((record[3]-expected).total_seconds())>60:
+                                    raise RuntimeError(f'Kein exakter Niederschlagszeitpunkt +{lead} h.')
+                                return np.maximum(interpolate(*record[:3],grid_m=500)[2],0)
+                            current_accum=fog_accumulation(hour)
+                            if fog_precip_previous_hour==hour-1:
+                                previous_accum=fog_precip_previous
+                            else:
+                                previous_accum=fog_accumulation(hour-1)
+                            hourly_rain=np.maximum(current_accum-previous_accum,0)
+                            categories[hourly_rain>=0.1]=4
+                            fog_precip_previous=current_accum
+                            fog_precip_previous_hour=hour
+                        original_png=(render_fog(X,Y,categories,run,msg[3]),)*2
+                    elif is_dew:
+                        original_png=tuple(render_png(X,Y,Z,run,msg[3],mode='ICON-D2 Taupunkt · keine lokale Korrektur',show_km_values=flag) for flag in (False,True))
+                    else:
+                        original_png = (render_gust(X,Y,Z,run,msg[3]), render_gust(X,Y,Z,run,msg[3],show_km_values=True)) if is_gust else (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True))
+                    local_png = None
+                    combined_png = None
+                    diff_png = None
+                    if terrain is not None:
+                        local, correction = downscale_temperature(Z, terrain)
+                        local_png = tuple(render_png(X,Y,local,run,msg[3],mode='Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag) for flag in (False,True))
+                        if landuse is not None:
+                            lu_corr = landuse_temperature_correction(landuse, msg[3])
+                            combined = local + lu_corr
+                            combined_png = tuple(render_png(X,Y,combined,run,msg[3],mode='Höhe + WorldCover-Landnutzung · experimentell',correction=combined-Z,show_km_values=flag) for flag in (False,True))
+                            diff_png = render_difference(X, Y, combined-Z, run, msg[3])
+                    images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
+            if not quarter_mode:
+                st.session_state[IMAGE_KEYS[parameter_page]] = images
+                status.update(label='Karten erstellt', state='complete')
         except Exception as exc:
             status.update(label='Abruf oder Verarbeitung fehlgeschlagen', state='error')
             st.error(f'{type(exc).__name__}: {exc}')
