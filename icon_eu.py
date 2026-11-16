@@ -405,7 +405,7 @@ def snow_water_mask(X,Y):
 def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     bounds=REGIONS[region]
     # A slightly shorter canvas for WW maps; preserve the full geographic extent and native data grid.
-    fig,ax=plt.subplots(figsize=(14,8.3),dpi=120)
+    fig,ax=plt.subplots(figsize=(12,8.5),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
     if parameter in ("Neuschneemenge","Schneehöhe"):
         from matplotlib.colors import ListedColormap, BoundaryNorm
