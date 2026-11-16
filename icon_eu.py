@@ -183,7 +183,7 @@ def render(X,Y,Z,region,parameter,run,valid):
         line=ax.contour(X,Y,Z,levels=contours,colors="#24364b",linewidths=.55)
         ax.clabel(line,inline=True,fontsize=6,fmt="%d")
         label="Luftdruck auf Meereshöhe (hPa)"
-    else:
+    elif parameter=="T850":
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         # Fixed meteorological T850 palette, with a narrow transition at 0 °C.
         # Slightly negative values remain light blue; positive values start dark green.
@@ -216,6 +216,36 @@ def render(X,Y,Z,region,parameter,run,valid):
         # Highlight the freezing-level isotherm without changing the temperature field.
         ax.contour(X,Y,Z,levels=[0],colors="#111827",linewidths=1.15)
         label="Temperatur auf 850 hPa (°C)"
+    else:
+        from matplotlib.colors import LinearSegmentedColormap, Normalize
+        if parameter=="2-m-Temperatur":
+            stops,vmin,vmax=TEMP_STOPS,-20,20
+            label="2-m-Temperatur (°C)"
+        elif parameter=="Windböen":
+            stops,vmin,vmax=GUST_STOPS,0,120
+            label="Windböen (km/h)"
+        elif parameter=="Niederschlagsrate":
+            stops,vmin,vmax=PREC_RATE,0,100
+            label="Niederschlagsrate (mm/h; letzte Stunde)"
+        elif parameter=="Niederschlagssumme":
+            stops,vmin,vmax=PREC_SUM,0,100
+            label="Niederschlagssumme seit Modellstart (mm = l/m²)"
+        else:
+            raise RuntimeError(f"Unbekannter Parameter: {parameter}")
+        cmap=LinearSegmentedColormap.from_list("elbtal_germany",[((v-vmin)/(vmax-vmin),color) for v,color in stops],N=2048)
+        norm=Normalize(vmin=vmin,vmax=vmax)
+        im=ax.contourf(X,Y,Z,levels=np.linspace(vmin,vmax,161),cmap=cmap,norm=norm,extend="both")
+        if parameter=="2-m-Temperatur":
+            contours=np.arange(-20,21,2)
+        elif parameter=="Windböen":
+            contours=np.arange(0,121,10)
+        else:
+            contours=[.5,1,2,5,10,20,30,50,75]
+        lo,hi=float(np.nanmin(Z)),float(np.nanmax(Z))
+        contours=[v for v in contours if lo<v<hi]
+        if contours:
+            lines=ax.contour(X,Y,Z,levels=contours,colors="#24364b",linewidths=.45,alpha=.7)
+            ax.clabel(lines,inline=True,fontsize=6,fmt="%g")
     try:
         data=borders(COUNTRIES)
         for feature in data.get("features",[]):
@@ -234,9 +264,14 @@ def render(X,Y,Z,region,parameter,run,valid):
     cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
     if parameter=="T850":
         cb.set_ticks(np.arange(-30,31,5))
-    else:
-        # Avoid crowded labels around 1025/1030 while preserving the exact color mapping.
+    elif parameter=="MSLP":
         cb.set_ticks([950,970,985,995,1005,1015,1030,1045,1060])
+    elif parameter=="2-m-Temperatur":
+        cb.set_ticks(np.arange(-20,21,5))
+    elif parameter=="Windböen":
+        cb.set_ticks(np.arange(0,121,10))
+    else:
+        cb.set_ticks([0,10,20,30,50,75,100])
     cb.set_label(label)
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
