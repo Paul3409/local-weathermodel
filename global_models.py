@@ -137,9 +137,18 @@ def monthly_pressure_climatology(month):
 def climatology_on_grid(X,Y,month):
     from scipy.interpolate import RegularGridInterpolator
     lat,lon,values=monthly_pressure_climatology(month)
-    il=np.argsort(lat);jl=np.argsort(lon)
-    interpolator=RegularGridInterpolator((lat[il],lon[jl]),values[np.ix_(il,jl)],bounds_error=False,fill_value=np.nan)
-    result=interpolator(np.column_stack((Y.ravel(),np.mod(X.ravel(),360)))).reshape(X.shape)
+    # NOAA longitudes run from 0 to <360; extend periodically across Greenwich.
+    # Europe contains negative longitudes, so modulo 360 alone puts western
+    # points beyond the last grid longitude and creates artificial NaNs.
+    il=np.argsort(lat);jl=np.argsort(np.mod(lon,360))
+    lon_sorted=np.mod(lon[jl],360)
+    field=values[np.ix_(il,jl)]
+    periodic_lon=np.concatenate((lon_sorted[-1:]-360,lon_sorted,lon_sorted[:1]+360))
+    periodic_field=np.concatenate((field[:,-1:],field,field[:,:1]),axis=1)
+    interpolator=RegularGridInterpolator((lat[il],periodic_lon),periodic_field,bounds_error=False,fill_value=np.nan)
+    query_lon=np.mod(X.ravel(),360)
+    query_lon=np.where(query_lon>periodic_lon[-2],query_lon-360,query_lon)
+    result=interpolator(np.column_stack((Y.ravel(),query_lon))).reshape(X.shape)
     if not np.isfinite(result).all():
         raise RuntimeError("Klimatologie deckt das Kartengebiet nicht vollständig ab.")
     return result
