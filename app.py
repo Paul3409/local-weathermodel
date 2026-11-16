@@ -616,10 +616,25 @@ def render_fog(X,Y,Z,run,valid):
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
 st.title(f'🌦️ ELBTAL · V{VERSION}')
-map_region = st.segmented_control('Kartengebiet', options=['Elbtal','KRUMET','Mitteleuropa','Europa & Nordatlantik','🌍 Globalmodelle','📡 Radar'], default='Elbtal', selection_mode='single')
+map_region = st.segmented_control('Kartengebiet', options=['Elbtal','KRUMET','🇩🇪 Deutschland Detail','Mitteleuropa','Europa & Nordatlantik','🌍 Globalmodelle','📡 Radar'], default='Elbtal', selection_mode='single')
 if map_region == '📡 Radar':
     from radar import show as show_radar
     show_radar()
+    st.stop()
+if map_region == '🇩🇪 Deutschland Detail':
+    st.subheader('🇩🇪 Deutschland · Detailkarte (3:4)')
+    detail_model = st.segmented_control(
+        'Modell für Deutschland',
+        ['ICON-D2', 'ICON-EU', 'GFS', 'ECMWF IFS'],
+        default='ICON-D2', key='germany_detail_model',
+    )
+    st.caption('Deutschland im 3:4-Hochformat · ICON-D2 als Standard; andere Modelle zum direkten Vergleich.')
+    if detail_model == 'ECMWF IFS':
+        from global_models import show as show_germany_global
+        show_germany_global('Deutschland', forced_model=detail_model)
+    else:
+        from icon_eu import show as show_germany_icon
+        show_germany_icon('Deutschland', forced_model=detail_model)
     st.stop()
 if map_region == '🌍 Globalmodelle':
     from global_models import show as show_global_models
