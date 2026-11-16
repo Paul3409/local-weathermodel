@@ -8,3 +8,4 @@ pillow>=10
 rasterio>=1.4
 pyproj>=3.6
 h5py>=3.12
+pandas>=2.1,<3
