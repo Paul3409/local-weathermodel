@@ -957,6 +957,7 @@ if krumet_mode:
                 yesterday = (datetime.now(TZ)-timedelta(days=1)).date()
                 night_date = st.date_input('Nacht beginnt am',value=yesterday,max_value=yesterday,key='krumet_night_date')
                 nights_count = st.slider('Anzahl Nächte für die Auswertung', min_value=1, max_value=14, value=5, key='krumet_nights_count')
+                proxy_test = st.checkbox('🔬 KRUMET-v0.4-Testmodus (Karten bleiben unverändert)',value=True,key='krumet_v04_test')
                 if st.button('Mehrere Nächte vergleichen',key='krumet_multi_night_go'):
                     try:
                         sid = station_options[station_label]
@@ -976,6 +977,31 @@ if krumet_mode:
                         if joined.empty:
                             st.info('Für den Zeitraum sind noch keine gemeinsamen Mess- und Archivwerte vorhanden.')
                         else:
+                            if proxy_test:
+                                try:
+                                    terrain_test = get_terrain((LAT_MIN,LAT_MAX,LON_MIN,LON_MAX))
+                                    ny,nx = terrain_test.shape
+                                    iy = int(np.clip(round((lat-LAT_MIN)/(LAT_MAX-LAT_MIN)*(ny-1)),0,ny-1))
+                                    ix = int(np.clip(round((lon-LON_MIN)/(LON_MAX-LON_MIN)*(nx-1)),0,nx-1))
+                                    _, terrain_delta = downscale_temperature(np.zeros_like(terrain_test),terrain_test)
+                                    dy = (LAT_MAX-LAT_MIN)*111200/(ny-1)
+                                    dx = (LON_MAX-LON_MIN)*111200*math.cos(math.radians((LAT_MIN+LAT_MAX)/2))/(nx-1)
+                                    valley = float(np.clip((gaussian_filter(terrain_test,(10000/dy,10000/dx))[iy,ix]-terrain_test[iy,ix])/100,0,1))
+                                    night_factor = np.maximum(0,np.cos((joined['Ortszeit'].dt.hour.to_numpy()-3)*np.pi/12))
+                                    calm = np.clip((18-joined['wind_speed_10m'].to_numpy(dtype=float))/15,0,1)
+                                    clear = np.clip((85-joined['cloud_cover'].to_numpy(dtype=float))/70,0,1)
+                                    # Same bounded v0.3 physics proxy, not trained on observations.
+                                    cooling = -1.5*night_factor*valley*calm*clear
+                                    joined['KRUMET-Proxy'] = joined['temperature_2m']+terrain_delta[iy,ix]+cooling
+                                    joined['KRUMET-Fehler'] = joined['KRUMET-Proxy']-joined['temperature']
+                                    proxy_valid = joined.dropna(subset=['KRUMET-Fehler'])
+                                    if not proxy_valid.empty:
+                                        st.metric('KRUMET-v0.4-Test MAE',f"{proxy_valid['KRUMET-Fehler'].abs().mean():.2f} °C")
+                                        st.metric('ICON-D2 MAE (gleiche Stunden)',f"{proxy_valid['Fehler'].abs().mean():.2f} °C")
+                                        st.caption('Testmodus: unveränderte v0.3-Formeln als historischer Punktdaten-Proxy. Kein neu kalibriertes Modell, keine exakte GRIB-Rekonstruktion.')
+                                        st.download_button('Stündlichen Testvergleich als CSV',data=proxy_valid[['Ortszeit','Nachtbeginn','temperature','temperature_2m','KRUMET-Proxy','Fehler','KRUMET-Fehler','wind_speed_10m','cloud_cover']].to_csv(index=False).encode('utf-8-sig'),file_name='KRUMET_v04_Testvergleich.csv',mime='text/csv',key='krumet_v04_csv')
+                                except (requests.RequestException,ValueError,RuntimeError,KeyError) as proxy_error:
+                                    st.warning(f'KRUMET-Testmodus nicht berechenbar: {type(proxy_error).__name__}: {proxy_error}')
                             summary = joined.groupby('Nachtbeginn').agg(
                                 Stunden=('Fehler','size'),
                                 Bias=('Fehler','mean'),
@@ -994,7 +1020,7 @@ if krumet_mode:
                                 st.metric('Tmin-Bias vollständiger Nächte',f"{complete['Tmin_Fehler'].mean():+.2f} °C")
                             st.caption(f"{len(joined)} gemeinsame Stunden, {len(summary)} Nächte; davon {len(complete)} mit mindestens 12 Messstunden. Positive Fehler bedeuten zu mild. Tmin-Fehler nur für Nächte mit mindestens 12 Stunden zusammengefasst.")
                             st.download_button('Nachtvergleich als CSV',data=summary.to_csv(index=False).encode('utf-8-sig'),file_name='KRUMET_Nachtvergleich.csv',mime='text/csv',key='krumet_multi_csv')
-                            st.info('Die Auswertung nutzt archivierte ICON-D2-Punktprognosen mit festem 24-h-Vorlauf. KRUMET-Proxy und Original-GRIB-Reforecast sind hier noch nicht Teil der Mehrnachtstatistik.')
+                            st.info('ICON-D2: archivierte Punktprognosen mit festem 24-h-Vorlauf. KRUMET im Testmodus: nur Näherung mit denselben Formeln und Eingangsdaten; keine Anpassung der offiziellen Karten.')
                     except (requests.RequestException,ValueError,KeyError,IndexError,FileNotFoundError) as multi_error:
                         st.warning(f'Mehrnachtvergleich nicht verfügbar: {type(multi_error).__name__}: {multi_error}')
                 if st.button('Abgeschlossene Nacht auswerten',key='krumet_night_go'):
