@@ -420,14 +420,6 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         water=snow_water_mask(X,Y)
         ax.pcolormesh(X,Y,np.ma.masked_where(~water,np.ones(Z.shape)),cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
         label="Schneehöhe (cm)" if parameter=="Schneehöhe" else "Berechnete Neuschneehöhe seit Modellstart (cm; 10:1-Schätzung bei ICON)"
-    elif parameter=="T850 + MSLP":
-        if mslp is None or mslp.shape!=Z.shape or not 850<float(np.nanmedian(mslp))<1100:
-            raise RuntimeError("MSLP-Raster für weiße Isobaren fehlt oder ist ungültig.")
-        levels=np.arange(-40,41,2)
-        im=ax.contourf(X,Y,Z,levels=levels,cmap="coolwarm",extend="both")
-        lines=ax.contour(X,Y,mslp,levels=np.arange(940,1081,4),colors="white",linewidths=1.05,alpha=.98)
-        ax.clabel(lines,inline=True,fontsize=7,fmt="%d",colors="white")
-        label="850-hPa-Luftmassentemperatur (°C) · weiße MSLP-Isobaren (hPa)"
     elif parameter=="Z500 + MSLP":
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         if mslp is None or mslp.shape!=Z.shape: raise RuntimeError("MSLP-Raster fehlt.")
@@ -507,7 +499,13 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         ax.clabel(line,inline=True,fontsize=6,fmt="%d")
         # Highlight the freezing-level isotherm without changing the temperature field.
         ax.contour(X,Y,Z,levels=[0],colors="#111827",linewidths=1.15)
-        label="Temperatur auf 850 hPa (°C)"
+        if parameter=="T850 + MSLP":
+            if mslp is None or mslp.shape!=Z.shape or not 850<float(np.nanmedian(mslp))<1100:
+                raise RuntimeError("MSLP-Raster für weiße Isobaren fehlt oder ist ungültig.")
+            lines=ax.contour(X,Y,mslp,levels=np.arange(940,1081,4),
+                             colors="white",linewidths=1.05,alpha=.98)
+            ax.clabel(lines,inline=True,fontsize=7,fmt="%d",colors="white")
+        label="Temperatur auf 850 hPa (°C)" + (" · weiße MSLP-Isobaren (hPa)" if parameter=="T850 + MSLP" else "")
     elif parameter=="Signifikantes Wetter":
         cmap,norm,bounds_ww=palette()
         im=ax.pcolormesh(X,Y,Z,cmap=cmap,norm=norm,shading="nearest",rasterized=True)
