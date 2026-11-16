@@ -237,10 +237,11 @@ def show():
     run=st.selectbox("Vier letzte berechnete Modellzyklen (UTC)",runs(model),format_func=lambda x:x.strftime("%d.%m.%Y %H UTC"),key="ens_run")
     st.caption("UTC bezeichnet die Modellinitialisierung. Die neuesten Zyklen werden erst nach einer Bereitstellungsfrist angeboten; einzelne Prognosedaten können dennoch fehlen.")
     horizon=st.select_slider("Prognosezeitraum",options=[48,96,144,192,240,288,336,384] if model=="GEFS" else [48,96,144,192,240,288,336,360] if run.hour in (0,12) else [48,96,144],value=96,key="ens_horizon")
-    interval=12 if horizon<=144 else 24
-    steps=list(range(0,horizon+1,interval))
+    # Every member and every parameter uses native 6-hourly forecast steps.
+    # In particular, T2 must retain the diurnal temperature cycle.
+    steps=list(range(0,horizon+1,6))
     lat,lon=PLACES[place]
-    st.caption("Offizielle Ensemble-Einzelmitglieder · GEFS: 30 + Kontrolllauf; ECMWF: 50. Die Berechnung kann wegen der Datenmenge länger dauern.")
+    st.caption(f"6-Stunden-Auflösung über den gesamten Zeitraum · {len(steps)} Zeitpunkte je Mitglied. GEFS: 30 + Kontrolllauf; ECMWF ENS: 50. Lange Zeiträume können beim ersten Abruf deutlich länger dauern.")
     if parameter=="Neuschnee":
         st.info("GEFS: positiver Schneehöhenzuwachs aus SNOD (cm), keine direkte Neuschneemessung. ECMWF: Schneefall-Wasseräquivalent (mm), keine Umrechnung in Schneehöhe.")
     if st.button("Ensemble berechnen",type="primary",key="ens_go"):
