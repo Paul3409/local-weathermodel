@@ -322,6 +322,47 @@ def draw_km_temperatures(ax, X, Y, Z, decimals=1):
                     color='#15263a',zorder=7,
                     bbox=dict(facecolor='white',alpha=.7,edgecolor='none',pad=.4))
 
+# Administrative overlays are cached and only fetched when KRUMET maps are rendered.
+KRUMET_BORDER_BASE = 'https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main'
+KRUMET_BORDER_FILES = {
+    'Bundesländer': KRUMET_BORDER_BASE + '/2_bundeslaender/3_mittel.geo.json',
+    'Landkreise': KRUMET_BORDER_BASE + '/4_kreise/4_niedrig.geo.json',
+}
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def load_krumet_border(kind):
+    response = requests.get(KRUMET_BORDER_FILES[kind], headers=HEADERS, timeout=20)
+    response.raise_for_status()
+    return response.json()
+
+def draw_krumet_borders(ax):
+    """Overlay administrative borders without altering temperature fields."""
+    for kind, color, width, alpha, zorder in (
+        ('Landkreise', '#f1f5f9', .52, .82, 9),
+        ('Bundesländer', '#17273d', 1.4, .95, 10),
+    ):
+        try:
+            features = load_krumet_border(kind).get('features', [])
+        except (requests.RequestException, ValueError):
+            continue  # Forecast rendering must work even if a border source is offline.
+        for feature in features:
+            geometry = feature.get('geometry') or {}
+            typ = geometry.get('type')
+            coords = geometry.get('coordinates', [])
+            polygons = [coords] if typ == 'Polygon' else (coords if typ == 'MultiPolygon' else [])
+            for polygon in polygons:
+                for ring in polygon:
+                    if len(ring) < 2:
+                        continue
+                    arr = np.asarray(ring, dtype=float)
+                    if arr.ndim != 2 or arr.shape[1] < 2:
+                        continue
+                    if (arr[:,0].max() < LON_MIN or arr[:,0].min() > LON_MAX or
+                            arr[:,1].max() < LAT_MIN or arr[:,1].min() > LAT_MAX):
+                        continue
+                    ax.plot(arr[:,0], arr[:,1], color=color, linewidth=width,
+                            alpha=alpha, zorder=zorder, solid_joinstyle='round')
+
 def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None, show_km_values=False, model_name='ICON-D2'):
     fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
@@ -332,6 +373,8 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
         ax.contour(X,Y,Z,levels=isolines,colors='#1c2836',linewidths=.65,alpha=.85)
     if show_km_values:
         draw_km_temperatures(ax,X,Y,Z)
+    if model_name == 'KRUMET':
+        draw_krumet_borders(ax)
     for name, (lat, lon) in PLACES.items():
         if LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX:
             ax.plot(lon, lat, marker='o', color='#101828', markersize=2.5, zorder=12)
@@ -368,6 +411,8 @@ def render_difference(X, Y, difference, run, valid, model_name='ICON-D2'):
     bound = max(.2, np.ceil(np.nanmax(np.abs(difference)) * 10) / 10)
     levels = np.linspace(-bound, bound, 21)
     filled = ax.contourf(X, Y, difference, levels=levels, cmap='RdBu_r', extend='both')
+    if model_name == 'KRUMET':
+        draw_krumet_borders(ax)
     for name, (lat, lon) in PLACES.items():
         if LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX:
             ax.plot(lon, lat, 'ko', markersize=2.5)
