@@ -14,14 +14,10 @@ from icon_eu import REGIONS, LOCAL_TZ, render
 PARAMS={"MSLP":"msl","T850":"t","T850 + MSLP":"t","Z500 + MSLP":"z"}
 HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.0 (educational)"}
 
-def cycles():
-    now=datetime.now(timezone.utc)
-    result=[]
-    for back in range(0,30,3):
-        d=(now-timedelta(hours=back)).replace(minute=0,second=0,microsecond=0)
-        d=d.replace(hour=d.hour//6*6)
-        if d not in result and (now-d).total_seconds()<=86400:result.append(d)
-    return result
+from model_cycles import recent_cycles
+
+def cycles(model):
+    return recent_cycles(model)
 
 def steps(model,run):
     if model=="ECMWF IFS":
@@ -200,9 +196,10 @@ def show(region, forced_model=None):
     st.subheader(f"Globale Modelle · {region}")
     model=forced_model or st.segmented_control("Modell",["ECMWF IFS","GEFS Mittel"],default="ECMWF IFS",key="global_model")
     st.caption("Direktdaten: ECMWF Open Data (IFS oper) / NOAA NOMADS (GEFS geavg). Kein Open-Meteo.")
-    available=cycles()
-    run=st.selectbox("Modelllauf der letzten 24 Stunden (UTC)",available,
+    available=cycles(model)
+    run=st.selectbox("Vier letzte berechnete Modellzyklen (UTC)",available,
         format_func=lambda d:f"{d:%d.%m.%Y %H} UTC",key="global_run_"+model)
+    st.caption("UTC-Initialisierung, nicht Fertigstellungszeit. Modellabhängige Verzögerung berücksichtigt; Dateiverfügbarkeit beim Abruf geprüft.")
     options=steps(model,run)
     lead=st.select_slider("Prognosestunde",options=options,value=options[min(2,len(options)-1)],
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
