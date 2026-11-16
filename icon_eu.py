@@ -510,7 +510,6 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         elif parameter=="Windchill":
             stops,vmin,vmax=TEMP_STOPS,-20,20
             label="Windchill (°C; T2m + Wind 10 m)"
-            label="2-m-Temperatur (°C)"
         elif parameter=="Taupunkt":
             stops,vmin,vmax=TEMP_STOPS,-20,20
             label="Taupunkttemperatur in 2 m (°C)"
