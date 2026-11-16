@@ -597,6 +597,15 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         else:
             ax.set_position([.095,.18,.875,.795])
             cb.ax.set_position([.14,.085,.78,.028])
+    if region=="Europa & Nordatlantik":
+        # Same wide layout for the other European synoptic parameters.
+        fig.set_size_inches(15,7.4)
+        ax.set_aspect("auto")
+        if parameter=="Signifikantes Wetter":
+            ax.set_position([.065,.10,.90,.86])
+        else:
+            ax.set_position([.065,.22,.90,.74])
+            cb.ax.set_position([.14,.105,.76,.035])
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
     plt.close(fig)
