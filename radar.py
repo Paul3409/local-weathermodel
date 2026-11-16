@@ -119,32 +119,44 @@ def sample_geometry(proj,x0,y0,x1,y1,shape):
     return X,Y,row,col
 
 def draw_boundaries(ax):
-    from icon_eu import borders,COUNTRIES,STATES
-    import matplotlib.patheffects as pe
-    # The original map uses dark outlines, which disappear against dark radar
-    # backgrounds and saturated precipitation cells. Draw crisp, high-contrast
-    # borders above the radar image with a dark halo.
+    """Fast high-contrast outlines, batched instead of thousands of plot artists."""
+    from icon_eu import borders, COUNTRIES, STATES
+    from matplotlib.collections import LineCollection
     for url,is_country in ((COUNTRIES,True),(STATES,False)):
         try:
-            features=borders(url).get("features",[])
-            for feature in features:
+            segments=[]
+            for feature in borders(url).get("features",[]):
                 geometry=feature.get("geometry") or {}
                 kind=geometry.get("type")
                 coords=geometry.get("coordinates",[])
                 polygons=[coords] if kind=="Polygon" else coords if kind=="MultiPolygon" else []
                 for polygon in polygons:
                     for ring in polygon:
-                        if len(ring)<2:continue
+                        if len(ring)<2:
+                            continue
                         points=np.asarray(ring,dtype=float)
-                        if points.ndim!=2 or points.shape[1]<2:continue
-                        ax.plot(points[:,0],points[:,1],
-                                color="#f2f7fb" if is_country else "#b5d1e1",
-                                linewidth=1.1 if is_country else .65,
-                                alpha=.95 if is_country else .85,zorder=20,
-                                path_effects=[pe.Stroke(linewidth=2.25 if is_country else 1.4,
-                                                        foreground="#061b2b"),pe.Normal()])
+                        if points.ndim!=2 or points.shape[1]<2:
+                            continue
+                        # Skip features entirely outside the German radar viewport.
+                        if (np.nanmax(points[:,0])<5.4 or np.nanmin(points[:,0])>15.6
+                            or np.nanmax(points[:,1])<46.9 or np.nanmin(points[:,1])>55.4):
+                            continue
+                        # Screen resolution cannot resolve subpixel border vertices.
+                        stride=max(1,len(points)//1400)
+                        reduced=points[::stride]
+                        if stride>1:
+                            reduced=np.vstack((reduced,points[-1]))
+                        segments.append(reduced)
+            if segments:
+                # Two batched collections: dark outline + visible light line.
+                ax.add_collection(LineCollection(segments,colors="#061b2b",
+                                  linewidths=1.8 if is_country else 1.05,
+                                  alpha=.9,zorder=19))
+                ax.add_collection(LineCollection(segments,
+                                  colors="#e8f4fa" if is_country else "#a8c8da",
+                                  linewidths=.85 if is_country else .45,
+                                  alpha=.9,zorder=20))
         except (requests.RequestException,ValueError,TypeError):
-            # Radar must remain available if boundary data is unavailable.
             pass
 
 def render(values,geo,product,stamp):
