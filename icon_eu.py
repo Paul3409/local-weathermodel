@@ -146,10 +146,37 @@ def render(X,Y,Z,region,parameter,run,valid):
         ax.clabel(line,inline=True,fontsize=6,fmt="%d")
         label="Luftdruck auf Meereshöhe (hPa)"
     else:
-        levels=np.arange(-30,31,2)
-        im=ax.contourf(X,Y,Z,levels=levels,cmap="coolwarm",extend="both")
+        from matplotlib.colors import LinearSegmentedColormap, Normalize
+        # Fixed meteorological T850 palette, with a narrow transition at 0 °C.
+        # Slightly negative values remain light blue; positive values start dark green.
+        anchors=[
+            (-30.0,"#F8F9FC"),  # nearly white
+            (-25.0,"#F4A6D4"),  # pink
+            (-20.0,"#A05BC6"),  # violet
+            (-15.0,"#542178"),  # dark violet
+            (-10.0,"#163A8C"),  # dark blue
+            (-5.0,"#2678D3"),   # blue
+            (-0.05,"#BDEBFA"),  # below zero: light blue
+            (0.05,"#14572C"),   # above zero: dark green
+            (5.0,"#39A447"),   # green
+            (10.0,"#F4DE45"),  # yellow
+            (15.0,"#F39839"),  # orange
+            (20.0,"#D93032"),  # red
+            (25.0,"#831727"),  # dark red
+            (30.0,"#9937B8"),  # purple
+        ]
+        cmap=LinearSegmentedColormap.from_list(
+            "elbtal_t850",
+            [((value+30)/60,color) for value,color in anchors],
+            N=512,
+        )
+        norm=Normalize(vmin=-30,vmax=30,clip=False)
+        levels=np.linspace(-30,30,241)
+        im=ax.contourf(X,Y,Z,levels=levels,cmap=cmap,norm=norm,extend="both")
         line=ax.contour(X,Y,Z,levels=np.arange(-30,31,5),colors="#24364b",linewidths=.45)
         ax.clabel(line,inline=True,fontsize=6,fmt="%d")
+        # Highlight the freezing-level isotherm without changing the temperature field.
+        ax.contour(X,Y,Z,levels=[0],colors="#111827",linewidths=1.15)
         label="Temperatur auf 850 hPa (°C)"
     try:
         data=borders(COUNTRIES)
@@ -167,6 +194,8 @@ def render(X,Y,Z,region,parameter,run,valid):
     ax.grid(alpha=.15)
     ax.set_title(f"ELBTAL | ICON-EU {parameter} | {region}\nLauf {run:%d.%m.%Y %H:%M} UTC · Gültig {valid:%d.%m.%Y %H:%M} UTC",fontsize=11)
     cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
+    if parameter=="T850":
+        cb.set_ticks(np.arange(-30,31,5))
     cb.set_label(label)
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
