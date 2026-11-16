@@ -57,6 +57,7 @@ def find_runs():
     return candidates
 
 
+@st.cache_data(ttl=600,show_spinner=False)
 def list_run(run, parameter="t_2m"):
     """Read DWD directory index and find T_2M GRIB files without assuming suffix layout."""
     folder = f'{BASE}/{run:%H}/{parameter}/'
@@ -323,7 +324,7 @@ def draw_km_temperatures(ax, X, Y, Z, decimals=1):
 def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None, show_km_values=False):
     fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
-    filled = ax.contourf(X,Y,Z,levels=np.arange(-20,20.001,.1),cmap=TEMP_CMAP,norm=TEMP_NORM,extend='both')
+    filled = ax.contourf(X,Y,Z,levels=np.arange(-20,20.001,.25),cmap=TEMP_CMAP,norm=TEMP_NORM,extend='both')
     zmin,zmax = float(np.nanmin(Z)),float(np.nanmax(Z))
     isolines = np.arange(np.ceil(zmin*2)/2,np.floor(zmax*2)/2+.01,.5)
     if len(isolines):
@@ -477,7 +478,7 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
         cmap=LinearSegmentedColormap.from_list('precip',[(v/vmax,col) for v,col in stops],N=2048)
         cmap.set_over(stops[-1][1])
         norm=Normalize(0,vmax)
-        filled=ax.contourf(X,Y,Z,levels=np.linspace(0,vmax,501),cmap=cmap,norm=norm,extend='max')
+        filled=ax.contourf(X,Y,Z,levels=np.linspace(0,vmax,151),cmap=cmap,norm=norm,extend='max')
         zmin,zmax=float(np.nanmin(Z)),float(np.nanmax(Z))
         boundaries=[v for v,_ in stops[1:] if zmin<v<zmax]
         if boundaries:
@@ -485,7 +486,7 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
         if show_km_values:
             draw_km_temperatures(ax,X,Y,Z)
         cb=fig.colorbar(filled,ax=ax,orientation='horizontal',fraction=.055,pad=.09)
-        cb.set_ticks([0,2,5,10,20,30,50,75,100])
+        cb.set_ticks([0,10,20,30,50,75,100])
         cb.ax.tick_params(labelsize=7)
         cb.set_label('mm/h (stündliches Mittel)' if parameter_page=='🌧️ Rate' else 'mm = l/m² (seit Modellstart)')
     for name,(lat,lon) in PLACES.items():
