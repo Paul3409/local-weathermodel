@@ -251,29 +251,17 @@ def show():
     st.caption(f"6-Stunden-Auflösung über den gesamten Zeitraum · {len(steps)} Zeitpunkte je Mitglied. GEFS: 30 + Kontrolllauf; ECMWF ENS: 50. Lange Zeiträume können beim ersten Abruf deutlich länger dauern.")
     if parameter=="Neuschnee":
         st.info("GEFS: positiver Schneehöhenzuwachs aus SNOD (cm), keine direkte Neuschneemessung. ECMWF: Schneefall-Wasseräquivalent (mm), keine Umrechnung in Schneehöhe.")
-    if st.button("Ensemble berechnen",type="primary",key="ens_go"):
-        with st.spinner("Ensemble-Einzelmitglieder werden direkt von NOAA / ECMWF geladen …"):
-            try:
-                field=FIELDS[parameter]
-
-                data,errors=fetch(model,run,field,lat,lon,steps)
-                if np.isfinite(data).sum()==0:raise RuntimeError("Keine gültigen Ensemble-Daten: "+("; ".join(errors[:2]) if errors else "Unbekannter Abruffehler"))
-                if parameter=="Neuschnee":
-                    differences=np.diff(data,axis=1,prepend=np.nan)
-                    data=np.maximum(differences,0) if model=="GEFS" else np.maximum(differences,0)
-                precipitation=None
-                if parameter=="T2 + Niederschlag":
-                    precipitation,precip_errors=fetch(model,run,"precip",lat,lon,steps)
-                    if np.isfinite(precipitation).sum()==0:
-                        raise RuntimeError("Niederschlagsdaten fehlen: "+"; ".join(precip_errors[:2]))
-                png=draw(model,place,run,field,steps,data,precipitation)
-                st.session_state["ens_chart"]=(model,place,parameter,run,horizon,png)
-                if errors:
-                    st.warning(f"{len(errors)} Teilabrufe fehlgeschlagen. Nur verfügbare Ensemblewerte dargestellt.")
-                    with st.expander("Technische Abruffehler anzeigen"):
-                        for message in list(dict.fromkeys(errors))[:8]:st.code(message)
-            except Exception as exc:st.error(f"Ensemble-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}")
-    chart=st.session_state.get("ens_chart")
-    if chart and chart[:5]==(model,place,parameter,run,horizon):
-        st.image(chart[5],width="stretch")
-        st.download_button("PNG herunterladen",chart[5],file_name=f"ELBTAL_Ensemble_{model.replace(' ','_')}_{run:%Y%m%d%H}.png",mime="image/png")
+    # PNGs are produced by GitHub Actions. Streamlit performs no model downloads.
+    import hashlib
+    from urllib.parse import quote
+    from pathlib import Path
+    from PIL import Image
+    from ensemble_archive import image_path
+    archive_path=image_path(model,place,parameter,run,horizon)
+    if archive_path.is_file():
+        st.image(str(archive_path),width="stretch")
+        st.download_button("PNG herunterladen",archive_path.read_bytes(),
+                           file_name=archive_path.name,mime="image/png")
+    else:
+        st.info("Dieses Ensemble-PNG ist noch nicht vorab berechnet oder der Lauf ist noch unvollständig. Die automatische GitHub-Aktion prüft die Daten erneut.")
+        st.caption("Zurzeit werden zuerst GEFS-Diagramme für Mühlberg (Elbe) automatisch vorbereitet. Weitere Orte und ECMWF ENS folgen nach dem Laufzeit- und Speichercheck.")
