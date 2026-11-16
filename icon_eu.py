@@ -21,7 +21,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "t850-palette-2026-11-16-v2"
+MAP_STYLE_VERSION = "mslp-vivid-1030-red-v1"
 
 class Links(HTMLParser):
     def __init__(self):
@@ -140,8 +140,31 @@ def render(X,Y,Z,region,parameter,run,valid):
     fig,ax=plt.subplots(figsize=(9,8),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
     if parameter=="MSLP":
-        levels=np.arange(950,1061,2)
-        im=ax.contourf(X,Y,Z,levels=levels,cmap="Spectral_r",extend="both")
+        from matplotlib.colors import LinearSegmentedColormap, Normalize
+        # Fixed, intentionally nonlinear pressure color anchors: vivid reds from 1030 hPa.
+        pressure_anchors=[
+            (950,"#30105B"),
+            (960,"#481A86"),
+            (975,"#5141AF"),
+            (985,"#2059B6"),
+            (995,"#299BC6"),
+            (1005,"#3CBF91"),
+            (1015,"#A8D45B"),
+            (1020,"#F3DE4C"),
+            (1025,"#F59B37"),
+            (1030,"#E43C38"),
+            (1040,"#A51E3C"),
+            (1050,"#681336"),
+            (1060,"#410C30"),
+        ]
+        cmap=LinearSegmentedColormap.from_list(
+            "elbtal_mslp_vivid",
+            [((pressure-950)/110,color) for pressure,color in pressure_anchors],
+            N=512,
+        )
+        norm=Normalize(vmin=950,vmax=1060,clip=False)
+        levels=np.linspace(950,1060,221)
+        im=ax.contourf(X,Y,Z,levels=levels,cmap=cmap,norm=norm,extend="both")
         contours=np.arange(940,1070,4)
         line=ax.contour(X,Y,Z,levels=contours,colors="#24364b",linewidths=.55)
         ax.clabel(line,inline=True,fontsize=6,fmt="%d")
@@ -197,6 +220,8 @@ def render(X,Y,Z,region,parameter,run,valid):
     cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
     if parameter=="T850":
         cb.set_ticks(np.arange(-30,31,5))
+    else:
+        cb.set_ticks([950,970,985,995,1005,1015,1025,1030,1040,1050,1060])
     cb.set_label(label)
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
