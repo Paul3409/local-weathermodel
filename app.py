@@ -309,6 +309,9 @@ def draw_km_temperatures(ax, X, Y, Z):
     points = np.array([(lat,lon) for lat in latitudes for lon in longitudes])
     values = RegularGridInterpolator((Y[:,0],X[0,:]),Z)(points)
     for (lat,lon),value in zip(points,values):
+        # Keep a clear space around each named place.
+        if any(abs(lat-p_lat) < .005 and abs(lon-p_lon) < .010 for p_lat,p_lon in PLACES.values()):
+            continue
         if np.isfinite(value):
             ax.text(lon,lat,f'{value:.1f}',ha='center',va='center',fontsize=5.2,
                     color='#15263a',zorder=7,
@@ -321,15 +324,15 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     zmin,zmax = float(np.nanmin(Z)),float(np.nanmax(Z))
     isolines = np.arange(np.ceil(zmin*2)/2,np.floor(zmax*2)/2+.01,.5)
     if len(isolines):
-        ax.contour(X,Y,Z,levels=isolines,colors='#273445',linewidths=.45,alpha=.65)
+        ax.contour(X,Y,Z,levels=isolines,colors='#1c2836',linewidths=.65,alpha=.85)
     if show_km_values:
         draw_km_temperatures(ax,X,Y,Z)
     for name, (lat, lon) in PLACES.items():
         if LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX:
-            ax.plot(lon, lat, marker='o', color='#101828', markersize=2.5)
+            ax.plot(lon, lat, marker='o', color='#101828', markersize=2.5, zorder=12)
             ax.annotate(name, (lon, lat), xytext=(4, 4), textcoords='offset points',
                         fontsize=8, weight='bold', color='#15263a',
-                        bbox=dict(facecolor='white', alpha=.72, edgecolor='none', pad=1))
+                        bbox=dict(facecolor='white', alpha=.88, edgecolor='none', pad=1), zorder=13)
     ax.set_xlim(LON_MIN, LON_MAX)
     ax.set_ylim(LAT_MIN, LAT_MAX)
     ax.set_aspect(1 / np.cos(np.deg2rad((LAT_MIN+LAT_MAX)/2)))
@@ -342,6 +345,8 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     cb.set_ticks([-20,-15,-10,-5,0,.5,5,10,15,20])
     cb.set_ticklabels(['−20','−15','−10','−5','0','0,5','5','10','15','20'])
     cb.ax.tick_params(labelsize=7)
+    cb.ax.get_xticklabels()[4].set_ha('right')
+    cb.ax.get_xticklabels()[5].set_ha('left')
     cb.set_label('2-m-Lufttemperatur (°C) · feste Skala; Frostnähe < 0,5 °C')
     fig.text(.5, .025, 'DWD ICON-D2 · Geländedaten: AWS Terrain Tiles (Terrarium) · experimentelle Höhenkorrektur' if correction is not None else 'DWD ICON-D2 · interpolierte Originalwerte',
              ha='center', fontsize=8, color='#48566a')
@@ -380,7 +385,7 @@ def render_difference(X, Y, difference, run, valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL-T2M · v0.5.4')
+st.title('🌡️ ELBTAL-T2M · v0.5.5')
 st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
 st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte WorldCover-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
 with st.expander('Landnutzung einmalig vorbereiten', expanded=not LANDUSE_FILE.exists()):
@@ -401,7 +406,8 @@ if LANDUSE_FILE.exists():
 else:
     st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
 enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
-max_steps = st.select_slider('Anzahl der Prognosestunden', options=[1, 2, 3, 4, 5, 6], value=6)
+start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +12 h)', options=list(range(13)), value=(0, 6), format_func=lambda h: f'+{h} h')
+st.caption(f'Es werden nur die Stunden +{start_hour} bis +{end_hour} (einschließlich) heruntergeladen und gezeichnet.')
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
     with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
         try:
@@ -410,9 +416,10 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             for run in find_runs():
                 try:
                     files, examples, matching = list_run(run)
-                    available = [h for h in range(0, max_steps+1) if h in files]
+                    requested = list(range(start_hour, end_hour + 1))
+                    available = [h for h in requested if h in files]
                     diagnostics.append(f'{run:%Y-%m-%d %H} UTC: {len(files)} Dateien; Stunden {available}; Beispiele: {matching or examples}')
-                    if len(available) >= max(2, max_steps-1):
+                    if len(available) == len(requested):
                         selected = (run, files, available)
                         break
                 except requests.RequestException as exc:
@@ -420,7 +427,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             if selected is None:
                 with st.expander('DWD-Diagnose (zum Kopieren)', expanded=True):
                     st.code('\n'.join(diagnostics))
-                raise RuntimeError('Kein passender ICON-D2-Lauf gefunden. Siehe DWD-Diagnose oben.')
+                raise RuntimeError(f'Kein ICON-D2-Lauf mit allen Stunden +{start_hour} bis +{end_hour} gefunden. Siehe DWD-Diagnose oben.')
             run, files, hours = selected
             st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
             images = []
@@ -465,9 +472,10 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
 
 if 'images' in st.session_state:
     images = st.session_state['images']
-    labels = [f'+{item[0]} h · {item[1].astimezone(TZ):%H:%M}' for item in images]
+    labels = [f'+{item[0]} h · {item[1].astimezone(TZ):%d.%m.%Y %H:%M %Z}' for item in images]
     choice = st.select_slider('Vorhersagekarte', options=range(len(images)),
                               format_func=lambda i: labels[i])
+    st.caption(f'Ausgewählt: {labels[choice]}')
     h, valid, original_png, local_png, combined_png, diff_png = images[choice]
     variants = {'ICON-D2 (interpoliert)': original_png}
     if local_png is not None:
