@@ -197,6 +197,7 @@ def discover_gfs(run,parameter,bounds):
         result[lead]=GFS_FILTER+"?"+urlencode(args)
     return result
 
+@st.cache_data(ttl=900,show_spinner=False)
 def load_gfs(url,valid,bounds,parameter):
     from scipy.interpolate import griddata
     response=requests.get(url,headers=HEADERS,timeout=100)
@@ -405,7 +406,7 @@ def show(region):
         format_func=lambda h:f"+{h} h · {(preview_run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="eu_lead_"+model,
     )
-    st.caption("Die Uhrzeit an der Auswahl ist eine Vorschau. Maßgeblich ist der beim Abruf tatsächlich gefundene Modelllauf; dessen Gültigkeitszeit steht auf der Karte.")
+    st.warning("Datum und Uhrzeit am Regler sind eine **Vorschau** für den jüngsten Hauptlauf. Falls dieser nicht verfügbar ist, wird ein älterer Lauf gewählt. **Die verbindliche Zeit steht auf der fertigen Karte (MEZ/MESZ).**")
     if st.button(f"{model}-Karte manuell berechnen",type="primary"):
         with st.status(f"{model}-Datei und Grenzen laden …",expanded=True) as status:
             try:
@@ -426,6 +427,13 @@ def show(region):
                     previous_lead=previous_eu_lead(lead)
                     required=[previous_lead,lead] if parameter=="Niederschlagsrate" and previous_lead is not None else [lead]
                     if all(hour in available for hour in required):
+                        if model=="GFS":
+                            try:
+                                # Check the actual GRIB; a URL may precede publication.
+                                load_gfs(available[lead],run+timedelta(hours=lead),REGIONS[region],parameter)
+                            except (requests.RequestException,RuntimeError,ValueError,OSError) as exc:
+                                st.write(f"GFS-Lauf {run:%d.%m. %H} UTC nicht verfügbar: {type(exc).__name__}")
+                                continue
                         selected=(run,available[lead],available.get(previous_lead))
                         break
                 if selected is None:
