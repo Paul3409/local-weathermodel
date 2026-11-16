@@ -956,6 +956,47 @@ if krumet_mode:
                 station_label = st.selectbox('Messstation für Nachtanalyse',list(station_options),key='krumet_night_station')
                 yesterday = (datetime.now(TZ)-timedelta(days=1)).date()
                 night_date = st.date_input('Nacht beginnt am',value=yesterday,max_value=yesterday,key='krumet_night_date')
+                nights_count = st.slider('Anzahl Nächte für die Auswertung', min_value=1, max_value=14, value=5, key='krumet_nights_count')
+                if st.button('Mehrere Nächte vergleichen',key='krumet_multi_night_go'):
+                    try:
+                        sid = station_options[station_label]
+                        station = next(row for row in station_list if row[0]==sid)
+                        lat,lon = station[2],station[3]
+                        observations = dwd_hourly_temperature(sid).copy()
+                        first_date = night_date-timedelta(days=nights_count-1)
+                        archive = archived_icon_d2(lat,lon,first_date,night_date+timedelta(days=1))
+                        joined = observations.merge(archive,on='time',how='inner')
+                        joined['Ortszeit'] = joined['time'].dt.tz_convert('Europe/Berlin')
+                        joined['Nachtbeginn'] = (joined['Ortszeit']-pd.Timedelta(hours=18)).dt.date
+                        joined['Stunde'] = joined['Ortszeit'].dt.hour
+                        joined = joined[(joined['Nachtbeginn']>=first_date)&(joined['Nachtbeginn']<=night_date)]
+                        joined = joined[(joined['Stunde']>=18)|(joined['Stunde']<=9)].copy()
+                        joined['Fehler'] = joined['temperature_2m']-joined['temperature']
+                        joined = joined.dropna(subset=['Fehler'])
+                        if joined.empty:
+                            st.info('Für den Zeitraum sind noch keine gemeinsamen Mess- und Archivwerte vorhanden.')
+                        else:
+                            summary = joined.groupby('Nachtbeginn').agg(
+                                Stunden=('Fehler','size'),
+                                Bias=('Fehler','mean'),
+                                MAE=('Fehler',lambda x:x.abs().mean()),
+                                Tmin_DWD=('temperature','min'),
+                                Tmin_ICON=('temperature_2m','min'),
+                                Wind=('wind_speed_10m','mean'),
+                                Bewoelkung=('cloud_cover','mean')
+                            ).reset_index()
+                            summary['Tmin_Fehler'] = summary['Tmin_ICON']-summary['Tmin_DWD']
+                            st.dataframe(summary.rename(columns={'Bias':'Bias (°C)','MAE':'MAE (°C)','Wind':'Wind (km/h)','Bewoelkung':'Bewölkung (%)','Tmin_Fehler':'Tmin-Fehler (°C)'}),hide_index=True)
+                            complete = summary[summary['Stunden']>=12]
+                            st.metric('Gesamt-MAE ICON-D2',f"{joined['Fehler'].abs().mean():.2f} °C")
+                            st.metric('Mittlerer ICON-D2-Bias',f"{joined['Fehler'].mean():+.2f} °C")
+                            if not complete.empty:
+                                st.metric('Tmin-Bias vollständiger Nächte',f"{complete['Tmin_Fehler'].mean():+.2f} °C")
+                            st.caption(f"{len(joined)} gemeinsame Stunden, {len(summary)} Nächte; davon {len(complete)} mit mindestens 12 Messstunden. Positive Fehler bedeuten zu mild. Tmin-Fehler nur für Nächte mit mindestens 12 Stunden zusammengefasst.")
+                            st.download_button('Nachtvergleich als CSV',data=summary.to_csv(index=False).encode('utf-8-sig'),file_name='KRUMET_Nachtvergleich.csv',mime='text/csv',key='krumet_multi_csv')
+                            st.info('Die Auswertung nutzt archivierte ICON-D2-Punktprognosen mit festem 24-h-Vorlauf. KRUMET-Proxy und Original-GRIB-Reforecast sind hier noch nicht Teil der Mehrnachtstatistik.')
+                    except (requests.RequestException,ValueError,KeyError,IndexError,FileNotFoundError) as multi_error:
+                        st.warning(f'Mehrnachtvergleich nicht verfügbar: {type(multi_error).__name__}: {multi_error}')
                 if st.button('Abgeschlossene Nacht auswerten',key='krumet_night_go'):
                     measurements = dwd_hourly_temperature(station_options[station_label]).copy()
                     start_local = datetime.combine(night_date,datetime.min.time(),tzinfo=TZ).replace(hour=18)
