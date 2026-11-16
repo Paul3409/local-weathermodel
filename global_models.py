@@ -186,6 +186,13 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     ax.set_title("")
     style_figure(fig,ax)
     colorbar.outline.set_edgecolor("#B5C8DC")
+    if region!="Deutschland":
+        # Wide Atlantic-European geographic field: allocate most of the
+        # horizontal canvas to the map instead of a near-square axes box.
+        fig.set_size_inches(15,7.4)
+        ax.set_aspect("auto")
+        ax.set_position([.055,.11,.82,.84])
+        colorbar.ax.set_position([.895,.18,.023,.66])
     out=io.BytesIO();fig.savefig(out,format="png",bbox_inches="tight");plt.close(fig)
     return frame_png(out.getvalue(),"MSLP-Anomalie",model,region,run,valid)
 
