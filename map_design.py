@@ -66,8 +66,9 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
     raw = Image.open(io.BytesIO(data)).convert("RGB")
     # Every exported weather map uses a genuine 4:3 canvas.
     # Contain the complete map image (never crop or stretch geographic data).
-    width = 1600
-    height = 1200
+    portrait = region == "Deutschland"
+    width = 1200 if portrait else 1600
+    height = 1600 if portrait else 1200
     scale = width / 1100.0
     u = lambda n: max(1, round(n * scale))
     margin = u(16)
