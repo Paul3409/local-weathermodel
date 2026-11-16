@@ -158,7 +158,7 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     from matplotlib.colors import TwoSlopeNorm
     from map_design import frame_png, style_figure
     delta=pressure-reference
-    fig,ax=plt.subplots(figsize=(14,7.2),dpi=120)
+    fig,ax=plt.subplots(figsize=(12,8.5),dpi=120)
     fig.patch.set_facecolor("#061C35")
     ax.set_facecolor("#061C35")
     bounds=REGIONS[region]
