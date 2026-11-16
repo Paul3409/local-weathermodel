@@ -185,7 +185,7 @@ def discover_gfs(run,parameter,bounds):
     var,level=GFS_FIELDS[parameter]
     west,east,south,north=bounds
     result={}
-    for lead in range(0,121,3):
+    for lead in range(0,385,3):
         args={
             "file":f"gfs.t{run:%H}z.pgrb2.0p25.f{lead:03d}",
             f"lev_{level}":"on",
@@ -396,7 +396,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU"):
 def show(region):
     st.subheader(f"Wettermodelle · {region}")
     model=st.segmented_control("Wettermodell",["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
-    st.caption("ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +120 h; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
+    st.caption("ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
     choices=(["MSLP","T850"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model=="ICON-EU" else (["MSLP","T850","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850"])
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
@@ -405,7 +405,7 @@ def show(region):
     preview_run=preview_run.replace(hour=(preview_run.hour//6)*6)
     lead=st.select_slider(
         "Vorhersagestunde · Datum und Uhrzeit (MEZ/MESZ)",
-        options=EU_LEADS if model=="ICON-EU" else list(range(0,121,3)),value=6,
+        options=EU_LEADS if model=="ICON-EU" else list(range(0,385,3)),value=6,
         format_func=lambda h:f"+{h} h · {(preview_run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="eu_lead_"+model,
     )
@@ -440,7 +440,7 @@ def show(region):
                         selected=(run,available[lead],available.get(previous_lead))
                         break
                 if selected is None:
-                    raise RuntimeError(f"Keine passende ICON-EU-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
+                    raise RuntimeError(f"Keine passende {model}-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
                 run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
                 X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model=="ICON-EU" else load_gfs(url,valid,REGIONS[region],parameter)
