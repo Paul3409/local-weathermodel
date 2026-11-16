@@ -64,16 +64,23 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
     """Professional navy frame. All weather values and palette colors stay intact."""
     from zoneinfo import ZoneInfo
     raw = Image.open(io.BytesIO(data)).convert("RGB")
-    # Keep the map itself at its original resolution, avoiding blur.
-    scale = raw.width / 1100.0
+    # Every exported weather map uses a genuine 16:9 canvas.
+    # Contain the complete map image (never crop or stretch geographic data).
+    width = 1600
+    height = 900
+    scale = width / 1100.0
     u = lambda n: max(1, round(n * scale))
     margin = u(16)
     top = u(201)
     is_weather = "Signifikantes Wetter" in str(parameter)
-    legend_h = u(232) if is_weather else 0
-    footer_h = u(80)
-    width = raw.width + margin * 2
-    height = top + raw.height + legend_h + footer_h
+    legend_h = u(145) if is_weather else 0
+    footer_h = u(62)
+    map_bottom = height - footer_h - legend_h - u(12)
+    max_map_w = width - 2 * margin
+    max_map_h = map_bottom - top
+    if max_map_h <= 0:
+        raise RuntimeError("Ungültiges 16:9-Kartenlayout.")
+    raw.thumbnail((max_map_w,max_map_h),Image.Resampling.LANCZOS)
     canvas = Image.new("RGB", (width, height), NAVY)
     d = ImageDraw.Draw(canvas)
     def text(x, y, value, size, color=WHITE, bold=False):
@@ -122,11 +129,11 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
             d.polygon([(ix,iy),(ix+u(26),iy+u(14)),(ix,iy+u(28))],outline=CYAN)
         text(x+59,124,label,13,MUTED,True)
         text(x+59,147,value,17 if i!=2 else 22,WHITE,True)
-    canvas.paste(raw,(margin,top))
+    canvas.paste(raw,((width-raw.width)//2,top+(max_map_h-raw.height)//2))
     if is_weather:
         # Full-width grouped legend; same exact category colors as the DWD WW raster.
-        ly=(top+raw.height)/scale+u(0)/scale+5
-        panel(16,ly,base_width-16,ly+193)
+        ly=(height-footer_h-legend_h)/scale
+        panel(16,ly,base_width-16,ly+140)
         groups=[
             ("Bewölkung",list(range(0,4))),
             ("Niederschlag",list(range(5,8))),
@@ -140,7 +147,7 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
         for gi,(group,indices) in enumerate(groups):
             gx=29+gi*cell
             if gi:
-                d.line((u(gx-10),u(ly+17),u(gx-10),u(ly+177)),fill="#245E83",width=max(1,u(1)))
+                d.line((u(gx-10),u(ly+17),u(gx-10),u(ly+128)),fill="#245E83",width=max(1,u(1)))
             text(gx,ly+13,group,13,WHITE,True)
             for j,idx in enumerate(indices):
                 label,color=CATEGORIES[idx]
@@ -152,8 +159,8 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
                        "Gewitter leicht/mäßig":"Gewitter\nleicht/mäßig"}
                 name=words.get(label,label)
                 d.multiline_text((u(gx+30),u(yy-2)),name,font=_font(u(11)),fill=WHITE,spacing=u(1))
-    fy=height-footer_h+u(12)
-    panel(16,fy,base_width-16,fy+52)
+    fy=(height-footer_h)/scale+5
+    panel(16,fy,base_width-16,fy+48)
     src=source or ("DWD" if model.startswith("ICON") else "NOAA")
     source_label = "DWD RADOLAN" if model == "DWD RADOLAN" else f"{src} ({model})"
     text(35,fy+16,f"Daten: {source_label}    |    Region: {region}",14,MUTED)
