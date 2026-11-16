@@ -624,16 +624,10 @@ def show(region, forced_model=None):
         st.caption("Schneedecke zum Gültigkeitszeitpunkt: ICON H_SNOW / GFS SNOD; nicht der seit Modellstart gefallene Schnee.")
     elif parameter=="Windchill":
         st.caption("Berechnete Windchill-Temperatur aus 2-m-Lufttemperatur und 10-m-Wind (U/V), nicht aus Böen. Formel nur bei ≤ 10 °C und Wind > 4,8 km/h; sonst Lufttemperatur. Keine vollständige gefühlte Temperatur (Sonne/Feuchte fehlen).")
-    now_preview=datetime.now(timezone.utc)
-    cycle_hours=(0,6,12,18)
-    run_options=[]
-    for back in range(0,31,6):
-        candidate=(now_preview-timedelta(hours=back)).replace(minute=0,second=0,microsecond=0)
-        candidate=candidate.replace(hour=(candidate.hour//6)*6)
-        if candidate not in run_options and (now_preview-candidate).total_seconds()<=24*3600:
-            run_options.append(candidate)
+    from model_cycles import recent_cycles
+    run_options=recent_cycles(model)
     run_choice=st.selectbox(
-        "Modelllauf auswählen · letzte 24 Stunden (UTC)",
+        "Modelllauf auswählen · vier letzte berechnete Zyklen (UTC)",
         options=[None]+run_options,
         format_func=lambda r: "Automatisch · jüngster verfügbarer Lauf" if r is None else f"{r:%d.%m.%Y %H} UTC",
         key="eu_run_"+model,
@@ -645,18 +639,11 @@ def show(region, forced_model=None):
         format_func=lambda h:f"+{h} h · {(preview_run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="eu_lead_"+model,
     )
-    st.caption("Manuell gewählte Läufe werden nicht stillschweigend durch einen anderen ersetzt. Die Verfügbarkeit wird beim Abruf geprüft; die verbindliche Zeit steht auf der Karte.")
+    st.caption("Vier UTC-Zyklen nach modellabhängiger Bereitstellungsfrist; tatsächliche Verfügbarkeit wird beim Abruf geprüft.")
     if st.button(f"{model}-Karte manuell berechnen",type="primary"):
         with st.status(f"{model}-Datei und Grenzen laden …",expanded=True) as status:
             try:
-                now=datetime.now(timezone.utc)
-                runs=[run_choice] if run_choice is not None else []
-                if run_choice is None:
-                    for offset in range(0,34,3):
-                        run=(now-timedelta(hours=offset)).replace(minute=0,second=0,microsecond=0)
-                        run=run.replace(hour=(run.hour//3)*3)
-                        if run not in runs and (model=="GFS" or model=="ICON-D2" or lead<=78 or run.hour in (0,6,12,18)) and (model!="GFS" or run.hour in (0,6,12,18)):
-                            runs.append(run)
+                runs=[run_choice] if run_choice is not None else recent_cycles(model, count=6)
                 variable="snow_gsp" if parameter=="Neuschneemenge" else ("pmsl" if parameter=="MSLP" else ("t" if parameter in ("T850","T850 + MSLP") else ("fi" if parameter=="Z500 + MSLP" else SURFACE_FIELDS.get(parameter,"t_2m"))))
                 selected=None
                 for run in runs:
