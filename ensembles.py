@@ -64,7 +64,7 @@ def read_point(data,lat,lon,expected):
                     if expected=="msl":value/=100
                     elif expected in ("t850","t2"):value-=273.15
                     elif expected=="snow" and short in ("sd","sde","snod"):value*=100
-                    elif expected in ("precip","snow") and short in ("tp","sf"):value*=1000
+                    elif expected=="precip" and short=="tp":value*=1000\n                    elif expected=="snow" and short=="sf":value*=1000
                     return value
                 finally:codes_release(gid)
     finally:
@@ -177,12 +177,19 @@ def draw(model,place,run,field,steps,data,precip=None):
     ax.xaxis.set_major_formatter(DateFormatter("%d.%m",tz=LOCAL_TZ))
     ax.yaxis.set_major_locator(MaxNLocator(8))
     if precip is not None:
-        rain=np.maximum(np.diff(precip,axis=1,prepend=np.nan),0)
+        # NOAA APCP is already an interval total in kg/m² = mm; ECMWF tp is cumulative.
+        rain=precip if model=="GEFS" else np.maximum(np.diff(precip,axis=1,prepend=np.nan),0)
         rain=np.nanmean(rain,axis=0)
-        ax2=ax.twinx()
-        ax2.bar(times,rain,width=.55,color="#44B9F0",alpha=.23)
-        ax2.set_ylabel("Niederschlag (mm / Intervall)",color="#83D8FF")
-        ax2.tick_params(axis="y",colors="#83D8FF")
+        ax2=fig.add_axes([.075,.17,.88,.075],sharex=ax,facecolor="#0C2946")
+        ax2.plot(times,rain,color="#50C8F0",lw=1.9,marker=".",markersize=3)
+        ax2.fill_between(times,0,rain,color="#50C8F0",alpha=.13)
+        ax2.set_ylabel("NS (mm/6h)",color="#83D8FF",fontsize=9)
+        ax2.tick_params(axis="y",colors="#83D8FF",labelsize=8)
+        ax2.tick_params(axis="x",labelbottom=False,bottom=False)
+        ax2.grid(color="#6C8BA5",alpha=.2,linestyle="--")
+        for spine in ax2.spines.values():spine.set_color("#5CA8D4")
+        ax2.set_ylim(bottom=0)
+        ax.set_position([.075,.35,.88,.35])
     # ELBTAL cloud mark in the same cyan line style as the weather map frames.
     for x,y,w,h,t1,t2 in [(.023,.919,.036,.037,0,180),(.039,.931,.051,.055,0,180),(.075,.918,.037,.039,0,180)]:
         fig.add_artist(Arc((x+w/2,y+h/2),w,h,theta1=t1,theta2=t2,
