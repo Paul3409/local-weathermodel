@@ -281,7 +281,8 @@ def render(X,Y,Z,region,parameter,run,valid):
 def show(region):
     st.subheader(f"ICON-EU · {region}")
     st.caption("Stündliche Original-Modellzeitpunkte; Landesgrenzen und bei Deutschland Bundesländergrenzen. Keine künstliche zeitliche Verfeinerung.")
-    parameter=st.radio("Parameter",["MSLP","T850"],horizontal=True,key="eu_parameter")
+    choices=["MSLP","T850"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])
+    parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter")
     lead=st.select_slider("Vorhersagestunde",options=list(range(25)),value=6,format_func=lambda h:f"+{h} h",key="eu_lead")
     if st.button("ICON-EU-Karte manuell berechnen",type="primary"):
         with st.status("ICON-EU-Datei und Grenzen laden …",expanded=True) as status:
@@ -293,21 +294,33 @@ def show(region):
                     run=run.replace(hour=(run.hour//3)*3)
                     if run not in runs:
                         runs.append(run)
-                variable="pmsl" if parameter=="MSLP" else "t"
+                variable="pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else SURFACE_FIELDS[parameter])
                 selected=None
                 for run in runs:
                     try:
                         available=discover(run,variable)
                     except requests.RequestException:
                         continue
-                    if lead in available:
-                        selected=(run,available[lead])
+                    required=[lead-1,lead] if parameter=="Niederschlagsrate" and lead>0 else [lead]
+                    if all(hour in available for hour in required):
+                        selected=(run,available[lead],available.get(lead-1))
                         break
                 if selected is None:
                     raise RuntimeError(f"Keine passende ICON-EU-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
-                run,url=selected
+                run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
                 X,Y,Z=load_grid(url,valid,REGIONS[region],variable)
+                if parameter=="Niederschlagsrate":
+                    if lead==0:
+                        Z=np.zeros_like(Z)
+                    else:
+                        _,_,prior=load_grid(previous_url,valid-timedelta(hours=1),REGIONS[region],variable)
+                        diff=Z-prior
+                        if np.nanmin(diff)<-.1:
+                            raise RuntimeError("Niederschlagsakkumulation fällt ab. Keine Rate berechnet.")
+                        Z=np.maximum(diff,0)
+                elif parameter=="Niederschlagssumme":
+                    Z=np.maximum(Z,0)
                 png=render(X,Y,Z,region,parameter,run,valid)
                 st.session_state["eu_map"]=(MAP_STYLE_VERSION,region,parameter,lead,valid,png)
                 status.update(label="ICON-EU-Karte erstellt",state="complete")
