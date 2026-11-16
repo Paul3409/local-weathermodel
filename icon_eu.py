@@ -247,7 +247,7 @@ def render(X,Y,Z,region,parameter,run,valid):
             label="Windböen (km/h)"
         elif parameter=="Niederschlagsrate":
             stops,vmin,vmax=PREC_RATE,0,100
-            label="Niederschlagsrate (mm/h; letzte Stunde)"
+            label="Niederschlagsrate (mm/h; Mittel des Akkumulationsintervalls)"
         elif parameter=="Niederschlagssumme":
             stops,vmin,vmax=PREC_SUM,0,100
             label="Niederschlagssumme seit Modellstart (mm = l/m²)"
