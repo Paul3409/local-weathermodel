@@ -405,7 +405,7 @@ def snow_water_mask(X,Y):
 def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     bounds=REGIONS[region]
     # A slightly shorter canvas for WW maps; preserve the full geographic extent and native data grid.
-    fig,ax=plt.subplots(figsize=(12,8.5),dpi=120)
+    fig,ax=plt.subplots(figsize=(9,11) if region=="Deutschland" else (12,8.5),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
     if parameter in ("Neuschneemenge","Schneehöhe"):
         from matplotlib.colors import ListedColormap, BoundaryNorm
@@ -592,9 +592,9 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     plt.close(fig)
     return frame_png(output.getvalue(), parameter, model, region, run, valid)
 
-def show(region):
+def show(region, forced_model=None):
     st.subheader(f"Wettermodelle · {region}")
-    model=st.segmented_control("Wettermodell",["ICON-EU","ICON-D2","GFS"] if region=="Deutschland" else ["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
+    model=forced_model or st.segmented_control("Wettermodell",["ICON-EU","ICON-D2","GFS"] if region=="Deutschland" else ["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
     st.caption("ICON-D2: Deutschland bis +48 h stündlich (sofern die DWD-Dateien verfügbar sind). ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
     choices=(["MSLP","T850","T850 + MSLP","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","T850 + MSLP","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","T850 + MSLP","Z500 + MSLP"])
