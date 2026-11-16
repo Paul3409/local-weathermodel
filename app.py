@@ -686,20 +686,26 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 # ICON-D2 quarter-hour forecasts are GRIB messages with exact validity times.
                 # The containing file is selected by its lead hour; never invent sub-hourly values.
                 quarter_images = []
-                cached_lead = None
-                cached_messages = None
+                cached_messages = {}
+                cached_grids = {}
                 field = 'vmax_10m' if is_gust else 'tot_prec'
                 def quarter_field(when):
-                    nonlocal_dummy = None
                     lead = max(0,math.ceil((when-run).total_seconds()/3600-1e-9))
                     if lead not in files:
                         raise RuntimeError(f'DWD-Datei für +{lead} h fehlt.')
-                    messages_q = decode_grib(files[lead],field)
-                    match = [m for m in messages_q if abs((m[3]-when).total_seconds())<=60]
-                    if not match:
-                        raise RuntimeError(f'Kein echter 15-Minuten-Wert für {when.astimezone(TZ):%d.%m.%Y %H:%M %Z}.')
-                    return interpolate(*match[0][:3])
+                    if lead not in cached_messages:
+                        cached_messages.clear()
+                        cached_grids.clear()
+                        cached_messages[lead] = decode_grib(files[lead],field)
+                    matches = [m for m in cached_messages[lead] if abs((m[3]-when).total_seconds())<=60]
+                    if not matches:
+                        raise RuntimeError(f'Keine echte 15-Minuten-Prognose für {when.astimezone(TZ):%d.%m.%Y %H:%M %Z} in DWD-Datei +{lead} h. Keine zeitliche Interpolation.')
+                    if when not in cached_grids:
+                        cached_grids[when] = interpolate(*matches[0][:3])
+                    return cached_grids[when]
                 minutes = range(start_hour*60,end_hour*60+1,15)
+                if end_hour-start_hour > 3:
+                    raise RuntimeError('15-Minuten-Modus aus Speicher- und Laufzeitgründen auf maximal 3 Stunden pro Berechnung begrenzt. Bitte Zeitraum verkleinern.')
                 for mi in minutes:
                     when = run+timedelta(minutes=mi)
                     if not is_gust and mi==0:
