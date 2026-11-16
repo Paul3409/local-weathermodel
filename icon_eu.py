@@ -22,7 +22,7 @@ from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_
 BASE = "https://opendata.dwd.de/weather/nwp/icon-eu/grib"
 COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson"
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
-REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa & Nordatlantik": (-35.0, 45.0, 32.0, 72.0)}
+REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Mitteleuropa": (2.0, 27.0, 44.0, 58.0), "Europa & Nordatlantik": (-35.0, 45.0, 32.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
 MAP_STYLE_VERSION = "windchill-v1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
@@ -269,7 +269,7 @@ def load_grid(url, valid, bounds, variable):
                         if not 0<=np.nanmedian(vals)<2000:
                             raise RuntimeError("Niederschlagswerte unplausibel; Karte nicht erstellt.")
                     from scipy.interpolate import griddata
-                    nx,ny=(225,180) if bounds==REGIONS["Deutschland"] else (300,220)
+                    nx,ny=(225,180) if bounds in (REGIONS["Deutschland"],REGIONS["Mitteleuropa"]) else (300,220)
                     x=np.linspace(west,east,nx)
                     y=np.linspace(south,north,ny)
                     X,Y=np.meshgrid(x,y)
@@ -405,7 +405,7 @@ def snow_water_mask(X,Y):
 def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     bounds=REGIONS[region]
     # A slightly shorter canvas for WW maps; preserve the full geographic extent and native data grid.
-    fig,ax=plt.subplots(figsize=(14,7.2),dpi=120)
+    fig,ax=plt.subplots(figsize=(14,8.3),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
     if parameter in ("Neuschneemenge","Schneehöhe"):
         from matplotlib.colors import ListedColormap, BoundaryNorm
