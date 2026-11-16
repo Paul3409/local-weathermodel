@@ -600,7 +600,7 @@ else:
 # Display an indicative local valid time while choosing lead hours; the exact run is shown after loading.
 preview_run = find_runs()[0]
 st.caption(f'Orientierung: Modelllauf {preview_run:%d.%m.%Y %H:%M} UTC. Bei fehlenden Dateien wird automatisch ein älterer Lauf gewählt; die endgültigen Zeiten stehen an den Karten.')
-start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +24 h)', options=list(range(25)), value=(0, 6), key='window_hour_'+IMAGE_KEYS[parameter_page], format_func=lambda h: f'+{h} h · {(preview_run+timedelta(hours=h)).astimezone(TZ):%d.%m. %H:%M %Z}')
+start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +48 h)', options=list(range(49)), value=(0, 6), key='window_hour_'+IMAGE_KEYS[parameter_page], format_func=lambda h: f'+{h} h · {(preview_run+timedelta(hours=h)).astimezone(TZ):%d.%m. %H:%M %Z}')
 st.caption(f'Gewählte Zeitspanne: {(preview_run+timedelta(hours=start_hour)).astimezone(TZ):%d.%m.%Y %H:%M %Z} bis {(preview_run+timedelta(hours=end_hour)).astimezone(TZ):%d.%m.%Y %H:%M %Z} (vorläufig). Es werden Karten nur für +{start_hour} bis +{end_hour} erstellt. Für Niederschlagsraten wird zusätzlich der jeweils vorherige Akkumulationsstand geladen.')
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
     with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
