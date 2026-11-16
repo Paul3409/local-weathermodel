@@ -23,7 +23,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "sigwx-ww-v1"
+MAP_STYLE_VERSION = "time-label-gfs-v1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -165,7 +165,87 @@ def load_grid(url, valid, bounds, variable):
             os.unlink(path)
     raise RuntimeError("Keine GRIB-Nachricht mit exakt passender Gültigkeitszeit und Druckfläche gefunden.")
 
-def render(X,Y,Z,region,parameter,run,valid):
+
+# NOAA NOMADS GFS 0.25-degree subset; request only the necessary field and area.
+GFS_FILTER="https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
+GFS_FIELDS={
+    "MSLP":("PRMSL","mean_sea_level"),
+    "T850":("TMP","850_mb"),
+    "2-m-Temperatur":("TMP","2_m_above_ground"),
+    "Taupunkt":("DPT","2_m_above_ground"),
+    "Windböen":("GUST","surface"),
+}
+@st.cache_data(ttl=600,show_spinner=False)
+def discover_gfs(run,parameter,bounds):
+    if parameter not in GFS_FIELDS:
+        return {}
+    # NOMADS exposes 3-hourly files for this interface; 0.25 degree is native.
+    from urllib.parse import urlencode
+    var,level=GFS_FIELDS[parameter]
+    west,east,south,north=bounds
+    result={}
+    for lead in range(0,121,3):
+        args={
+            "file":f"gfs.t{run:%H}z.pgrb2.0p25.f{lead:03d}",
+            f"lev_{level}":"on",
+            f"var_{var}":"on",
+            "subregion":"",
+            "leftlon":str(west-.5),"rightlon":str(east+.5),
+            "toplat":str(north+.5),"bottomlat":str(south-.5),
+            "dir":f"/gfs.{run:%Y%m%d}/{run:%H}/atmos",
+        }
+        result[lead]=GFS_FILTER+"?"+urlencode(args)
+    return result
+
+def load_gfs(url,valid,bounds,parameter):
+    from scipy.interpolate import griddata
+    response=requests.get(url,headers=HEADERS,timeout=100)
+    response.raise_for_status()
+    data=response.content
+    if not data.startswith(b"GRIB"):
+        raise RuntimeError("NOAA-NOMADS liefert aktuell keine GFS-GRIB-Daten (Modelllauf möglicherweise noch nicht verfügbar).")
+    path=None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".grib2",delete=False) as file:
+            file.write(data)
+            path=file.name
+        with open(path,"rb") as stream:
+            while True:
+                gid=codes_grib_new_from_file(stream)
+                if gid is None:break
+                try:
+                    date=int(codes_get(gid,"validityDate"))
+                    time=int(codes_get(gid,"validityTime"))
+                    stamp=datetime.strptime(f"{date:08d}{time:04d}","%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+                    if abs((stamp-valid).total_seconds())>60:continue
+                    lat=np.asarray(codes_get_array(gid,"latitudes"))
+                    lon=np.asarray(codes_get_array(gid,"longitudes"))
+                    vals=np.asarray(codes_get_array(gid,"values"))
+                    lon=np.where(lon>180,lon-360,lon)
+                    west,east,south,north=bounds
+                    mask=(lon>=west-.5)&(lon<=east+.5)&(lat>=south-.5)&(lat<=north+.5)
+                    if not mask.any():continue
+                    lat,lon,vals=lat[mask],lon[mask],vals[mask]
+                    if parameter=="MSLP":vals=vals/100.
+                    elif parameter in ("T850","2-m-Temperatur","Taupunkt"):vals=vals-273.15
+                    elif parameter=="Windböen":vals=vals*3.6
+                    if not np.isfinite(vals).all():raise RuntimeError("GFS-Feld enthält fehlende Werte.")
+                    if parameter=="MSLP" and not 850<np.median(vals)<1100:raise RuntimeError("GFS-MSLP unplausibel.")
+                    if parameter in ("T850","2-m-Temperatur","Taupunkt") and not -100<np.median(vals)<60:raise RuntimeError("GFS-Temperatur unplausibel.")
+                    if parameter=="Windböen" and not 0<=np.median(vals)<250:raise RuntimeError("GFS-Windböen unplausibel.")
+                    nx,ny=(225,180) if bounds==REGIONS["Deutschland"] else (300,220)
+                    X,Y=np.meshgrid(np.linspace(west,east,nx),np.linspace(south,north,ny))
+                    Z=griddata(np.column_stack((lon,lat)),vals,(X,Y),method="linear")
+                    if not np.isfinite(Z).all():
+                        nearest=griddata(np.column_stack((lon,lat)),vals,(X,Y),method="nearest")
+                        Z=np.where(np.isfinite(Z),Z,nearest)
+                    return X,Y,Z
+                finally:codes_release(gid)
+    finally:
+        if path and os.path.exists(path):os.unlink(path)
+    raise RuntimeError("GFS-GRIB-Datei enthält kein Feld mit der angeforderten Gültigkeitszeit.")
+
+def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU"):
     bounds=REGIONS[region]
     fig,ax=plt.subplots(figsize=(9,8),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
@@ -283,7 +363,7 @@ def render(X,Y,Z,region,parameter,run,valid):
     ax.set_xlabel("Längengrad (°O)")
     ax.set_ylabel("Breitengrad (°N)")
     ax.grid(alpha=.15)
-    ax.set_title(f"ELBTAL | ICON-EU {parameter} | {region}\nLauf {run:%d.%m.%Y %H:%M} UTC · Gültig {valid:%d.%m.%Y %H:%M} UTC",fontsize=11)
+    ax.set_title(f"ELBTAL | {model} {parameter} | {region}\nLauf {run:%d.%m.%Y %H:%M} UTC · Gültig {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",fontsize=11)
     if parameter=="Signifikantes Wetter":
         fig.subplots_adjust(bottom=.27)
         fig.legend(handles=legend_handles(),loc="lower center",ncol=4,fontsize=7,
@@ -310,36 +390,37 @@ def render(X,Y,Z,region,parameter,run,valid):
     return output.getvalue()
 
 def show(region):
-    st.subheader(f"ICON-EU · {region}")
-    st.caption("ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden (abhängig vom verfügbaren Modelllauf). Landes- und Bundesländergrenzen bleiben erhalten.")
+    st.subheader(f"Wettermodelle · {region}")
+    model=st.segmented_control("Wettermodell",["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
+    st.caption("ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +120 h; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
-    choices=["MSLP","T850"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])
-    parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter")
+    choices=(["MSLP","T850"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model=="ICON-EU" else (["MSLP","T850","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850"])
+    parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
     now_preview=datetime.now(timezone.utc)
     preview_run=now_preview.replace(minute=0,second=0,microsecond=0)
     preview_run=preview_run.replace(hour=(preview_run.hour//6)*6)
     lead=st.select_slider(
         "Vorhersagestunde · Datum und Uhrzeit (MEZ/MESZ)",
-        options=EU_LEADS,value=6,
+        options=EU_LEADS if model=="ICON-EU" else list(range(0,121,3)),value=6,
         format_func=lambda h:f"+{h} h · {(preview_run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
-        key="eu_lead",
+        key="eu_lead_"+model,
     )
-    st.caption("Zeitangabe vorläufig für den jüngsten 6-stündlichen Hauptlauf; nach dem Abruf zählt die Gültigkeitszeit der tatsächlich verwendeten Datei.")
-    if st.button("ICON-EU-Karte manuell berechnen",type="primary"):
-        with st.status("ICON-EU-Datei und Grenzen laden …",expanded=True) as status:
+    st.caption("Die Uhrzeit an der Auswahl ist eine Vorschau. Maßgeblich ist der beim Abruf tatsächlich gefundene Modelllauf; dessen Gültigkeitszeit steht auf der Karte.")
+    if st.button(f"{model}-Karte manuell berechnen",type="primary"):
+        with st.status(f"{model}-Datei und Grenzen laden …",expanded=True) as status:
             try:
                 now=datetime.now(timezone.utc)
                 runs=[]
                 for offset in range(0,34,3):
                     run=(now-timedelta(hours=offset)).replace(minute=0,second=0,microsecond=0)
                     run=run.replace(hour=(run.hour//3)*3)
-                    if run not in runs and (lead<=78 or run.hour in (0,6,12,18)):
+                    if run not in runs and (model=="GFS" or lead<=78 or run.hour in (0,6,12,18)) and (model!="GFS" or run.hour in (0,6,12,18)):
                         runs.append(run)
                 variable="pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else SURFACE_FIELDS[parameter])
                 selected=None
                 for run in runs:
                     try:
-                        available=discover(run,variable)
+                        available=discover(run,variable) if model=="ICON-EU" else discover_gfs(run,parameter,REGIONS[region])
                     except requests.RequestException:
                         continue
                     previous_lead=previous_eu_lead(lead)
@@ -351,7 +432,7 @@ def show(region):
                     raise RuntimeError(f"Keine passende ICON-EU-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
                 run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
-                X,Y,Z=load_grid(url,valid,REGIONS[region],variable)
+                X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model=="ICON-EU" else load_gfs(url,valid,REGIONS[region],parameter)
                 if parameter=="Niederschlagsrate":
                     if lead==0:
                         Z=np.zeros_like(Z)
@@ -368,20 +449,20 @@ def show(region):
                     Z=classify_ww(Z)
                 if parameter=="Niederschlagsrate" and lead>78:
                     st.info(f"Niederschlagsrate: Mittelwert über die letzten {lead-previous_lead} Stunden (mm/h), nicht einstündiger Niederschlag.")
-                png=render(X,Y,Z,region,parameter,run,valid)
-                st.session_state["eu_map"]=(MAP_STYLE_VERSION,region,parameter,lead,valid,png)
+                png=render(X,Y,Z,region,parameter,run,valid,model=model)
+                st.session_state["eu_map"]=(MAP_STYLE_VERSION,model,region,parameter,lead,valid,png)
                 st.caption(f"Verwendeter Modelllauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
-                status.update(label="ICON-EU-Karte erstellt",state="complete")
+                status.update(label=f"{model}-Karte erstellt",state="complete")
             except Exception as exc:
-                status.update(label="ICON-EU-Verarbeitung fehlgeschlagen",state="error")
+                status.update(label=f"{model}-Verarbeitung fehlgeschlagen",state="error")
                 st.error(f"{type(exc).__name__}: {exc}")
     result=st.session_state.get("eu_map")
-    if result and (len(result)!=6 or result[0]!=MAP_STYLE_VERSION):
+    if result and (len(result)!=7 or result[0]!=MAP_STYLE_VERSION):
         st.session_state.pop("eu_map",None)
         st.info("Die Karten-Farbskala wurde aktualisiert. Bitte die ICON-EU-Karte erneut berechnen.")
         result=None
-    if result and len(result)==6 and result[:4]==(MAP_STYLE_VERSION,region,parameter,lead):
-        _,_,_,_,valid,png=result
+    if result and len(result)==7 and result[:5]==(MAP_STYLE_VERSION,model,region,parameter,lead):
+        _,_,_,_,_,valid,png=result
         st.caption(f"Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z} · Modellzeitpunkt UTC: {valid:%d.%m.%Y %H:%M}")
         st.image(png,width="stretch")
-        st.download_button("PNG herunterladen",png,file_name=f"ELBTAL_ICON-EU_{region}_{parameter}_{valid:%Y%m%d_%H%M}.png",mime="image/png")
+        st.download_button("PNG herunterladen",png,file_name=f"ELBTAL_{model}_{region}_{parameter}_{valid:%Y%m%d_%H%M}.png",mime="image/png")
