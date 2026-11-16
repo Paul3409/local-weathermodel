@@ -549,7 +549,7 @@ def render_fog(X,Y,Z,run,valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌦️ ELBTAL · v0.8.1')
+st.title('🌦️ ELBTAL · v0.9.0')
 st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
 parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','❄️ Art','💦 Taupunkt','🌫️ Nebel'], default='🌡️ Temperatur', selection_mode='single')
 is_gust = parameter_page == '🌬️ Windböen'
@@ -591,6 +591,7 @@ else:
         st.caption('Niederschlagsart aus stündlichen Regen-/Schneeanteilen; Graupel und unklare Fälle grau. Gefrierender Regen wird nicht diagnostiziert.')
     else:
         st.caption('ICON-D2-Niederschlag als Wasseräquivalent. Rate = stündliche Akkumulationsdifferenz.')
+quarter_mode = (is_gust or parameter_page == '🌧️ Rate') and st.radio('Zeitschritte', ['1 Stunde','15 Minuten'],horizontal=True,key='steps_'+IMAGE_KEYS[parameter_page]) == '15 Minuten'
 # Display an indicative local valid time while choosing lead hours; the exact run is shown after loading.
 preview_run = find_runs()[0]
 st.caption(f'Orientierung: Modelllauf {preview_run:%d.%m.%Y %H:%M} UTC. Bei fehlenden Dateien wird automatisch ein älterer Lauf gewählt; die endgültigen Zeiten stehen an den Karten.')
@@ -681,6 +682,44 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     if any(h not in available_files for h in hours):
                         raise RuntimeError(f'Für Niederschlagsart fehlen Daten: {component} in ausgewählter Spanne.')
                     phase_files[component] = available_files
+            if quarter_mode:
+                # ICON-D2 quarter-hour forecasts are GRIB messages with exact validity times.
+                # The containing file is selected by its lead hour; never invent sub-hourly values.
+                quarter_images = []
+                cached_lead = None
+                cached_messages = None
+                field = 'vmax_10m' if is_gust else 'tot_prec'
+                def quarter_field(when):
+                    nonlocal_dummy = None
+                    lead = max(0,math.ceil((when-run).total_seconds()/3600-1e-9))
+                    if lead not in files:
+                        raise RuntimeError(f'DWD-Datei für +{lead} h fehlt.')
+                    messages_q = decode_grib(files[lead],field)
+                    match = [m for m in messages_q if abs((m[3]-when).total_seconds())<=60]
+                    if not match:
+                        raise RuntimeError(f'Kein echter 15-Minuten-Wert für {when.astimezone(TZ):%d.%m.%Y %H:%M %Z}.')
+                    return interpolate(*match[0][:3])
+                minutes = range(start_hour*60,end_hour*60+1,15)
+                for mi in minutes:
+                    when = run+timedelta(minutes=mi)
+                    if not is_gust and mi==0:
+                        continue
+                    st.write(f'15-Minuten-Karte: {when.astimezone(TZ):%d.%m.%Y %H:%M %Z}')
+                    X,Y,Z = quarter_field(when)
+                    if is_gust:
+                        png=(render_gust(X,Y,Z,run,when),render_gust(X,Y,Z,run,when,True))
+                    else:
+                        _,_,prior = quarter_field(when-timedelta(minutes=15))
+                        if np.nanmin(Z-prior)<-.1:
+                            raise RuntimeError('Akkumulation zwischen Viertelstunden fällt ab.')
+                        rate=np.maximum(Z-prior,0)*4
+                        png=(render_precip(X,Y,rate,run,when,'🌧️ Rate'),render_precip(X,Y,rate,run,when,'🌧️ Rate',True))
+                    quarter_images.append((mi/60,when,png,None,None,None))
+                if not quarter_images:
+                    raise RuntimeError('Keine Viertelstundenkarten vorhanden.')
+                st.session_state[IMAGE_KEYS[parameter_page]] = quarter_images
+                status.update(label='15-Minuten-Karten erstellt',state='complete')
+                st.stop()
             for idx, hour in enumerate(hours):
                 st.write(f'Lade Daten +{hour} h ({idx+1}/{len(hours)}) …')
                 messages = decode_grib(files[hour], 'tot_prec' if is_precip else ('td_2m' if is_dew or is_fog else ('vmax_10m' if is_gust else 't_2m')))
@@ -801,7 +840,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
 image_key = IMAGE_KEYS[parameter_page]
 if image_key in st.session_state:
     images = st.session_state[image_key]
-    labels = [f'+{item[0]} h · {item[1].astimezone(TZ):%d.%m.%Y %H:%M %Z}' for item in images]
+    labels = [f'+{item[0]:g} h · {item[1].astimezone(TZ):%d.%m.%Y %H:%M %Z}' for item in images]
     choice = st.select_slider('Vorhersagekarte', options=range(len(images)),
                               format_func=lambda i: labels[i], key='hour_'+image_key)
     st.caption(f'Ausgewählt: {labels[choice]}')
