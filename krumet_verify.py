@@ -17,11 +17,12 @@ def stations():
     for line in response.content.decode("latin-1").splitlines()[2:]:
         # DWD fixed-width station metadata: ID, dates, height, latitude, longitude, name.
         try:
-            sid = line[0:5].strip()
-            height = float(line[32:38].strip())
-            lat = float(line[38:50].strip())
-            lon = float(line[50:60].strip())
-            name = line[60:101].strip()
+            fields = line.split(maxsplit=6)
+            if len(fields) < 7:
+                continue
+            sid, _, _, h, la, lo, tail = fields
+            height, lat, lon = float(h), float(la), float(lo)
+            name = tail.strip()
             if sid.isdigit() and 50.0 <= lat <= 52.2 and 11.5 <= lon <= 15.4:
                 result.append((sid, name, lat, lon, height))
         except (ValueError, IndexError):
