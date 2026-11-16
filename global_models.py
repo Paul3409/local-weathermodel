@@ -124,8 +124,8 @@ def monthly_pressure_climatology(month):
                 lat=np.asarray(nc["lat"][:],dtype=float)
                 lon=np.asarray(nc["lon"][:],dtype=float)
                 values=np.asarray(nc["slp"][month-1],dtype=float)
-                scale=float(nc["slp"].attrs.get("scale_factor",1))
-                offset=float(nc["slp"].attrs.get("add_offset",0))
+                scale=np.asarray(nc["slp"].attrs.get("scale_factor",1),dtype=float).reshape(-1)[0]
+                offset=np.asarray(nc["slp"].attrs.get("add_offset",0),dtype=float).reshape(-1)[0]
                 values=values*scale+offset
             if values.shape!=(len(lat),len(lon)) or not 950<float(np.nanmedian(values))<1060:
                 raise ValueError("Ungültige MSLP-Klimatologie.")
