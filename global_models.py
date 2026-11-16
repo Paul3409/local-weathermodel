@@ -158,7 +158,7 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     from matplotlib.colors import TwoSlopeNorm
     from map_design import frame_png, style_figure
     delta=pressure-reference
-    fig,ax=plt.subplots(figsize=(12,8.5),dpi=120)
+    fig,ax=plt.subplots(figsize=(9,11) if region=="Deutschland" else (12,8.5),dpi=120)
     fig.patch.set_facecolor("#061C35")
     ax.set_facecolor("#061C35")
     bounds=REGIONS[region]
@@ -189,9 +189,9 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     out=io.BytesIO();fig.savefig(out,format="png",bbox_inches="tight");plt.close(fig)
     return frame_png(out.getvalue(),"MSLP-Anomalie",model,region,run,valid)
 
-def show(region):
+def show(region, forced_model=None):
     st.subheader(f"Globale Modelle · {region}")
-    model=st.segmented_control("Modell",["ECMWF IFS","GEFS Mittel"],default="ECMWF IFS",key="global_model")
+    model=forced_model or st.segmented_control("Modell",["ECMWF IFS","GEFS Mittel"],default="ECMWF IFS",key="global_model")
     st.caption("Direktdaten: ECMWF Open Data (IFS oper) / NOAA NOMADS (GEFS geavg). Kein Open-Meteo.")
     available=cycles()
     run=st.selectbox("Modelllauf der letzten 24 Stunden (UTC)",available,
