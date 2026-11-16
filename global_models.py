@@ -9,7 +9,7 @@ import requests
 import streamlit as st
 from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_release
 from scipy.interpolate import griddata
-from icon_eu import REGIONS, LOCAL_TZ, render, borders, COUNTRIES
+from icon_eu import REGIONS, LOCAL_TZ, render
 
 PARAMS={"MSLP":"msl","T850":"t","Z500 + MSLP":"z"}
 HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.0 (educational)"}
@@ -118,11 +118,20 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     im=ax.contourf(X,Y,delta,levels=levels,cmap="RdBu_r",norm=TwoSlopeNorm(vcenter=0,vmin=-32,vmax=32),extend="both")
     lines=ax.contour(X,Y,pressure,levels=np.arange(940,1081,4),colors="#1b2735",linewidths=.6)
     ax.clabel(lines,inline=True,fontsize=6,fmt="%d")
+    from icon_eu import borders, COUNTRIES
     try:
-        from icon_eu import draw_borders
-        draw_borders(ax,region)
-    except (ImportError,TypeError,AttributeError):
-        pass
+        import matplotlib.path as mpath
+        from matplotlib.patches import PathPatch
+        for feature in borders(COUNTRIES).get("features",[]):
+            geom=feature.get("geometry") or {}
+            polys=geom.get("coordinates",[]) if geom.get("type")=="MultiPolygon" else [geom.get("coordinates",[])]
+            for poly in polys:
+                for ring in poly:
+                    if len(ring)>2:
+                        arr=np.asarray(ring)
+                        ax.plot(arr[:,0],arr[:,1],color="#343e4d",linewidth=.45,alpha=.8)
+    except (requests.RequestException,ValueError,KeyError):
+        st.caption("Grenzdaten momentan nicht verfügbar.")
     ax.set_xlim(bounds[0],bounds[1]);ax.set_ylim(bounds[2],bounds[3])
     ax.set_xlabel("Längengrad");ax.set_ylabel("Breitengrad")
     fig.colorbar(im,ax=ax,shrink=.75,label="MSLP-Anomalie (hPa)")
@@ -177,4 +186,4 @@ def show(region):
     result=st.session_state.get("global_map")
     if result and result[:5]==(model,region,run,lead,parameter):
         st.image(result[6],use_container_width=True)
-        st.download_button("PNG herunterladen",result[6],file_name=f"ELBTAL_{model.replace(' ','_')}_{valid:%Y%m%d%H}_{lead:03d}.png",mime="image/png")
+        st.download_button("PNG herunterladen",result[6],file_name=f"ELBTAL_{model.replace(' ','_')}_{result[5]:%Y%m%d%H}_{lead:03d}.png",mime="image/png")
