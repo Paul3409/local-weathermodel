@@ -572,9 +572,9 @@ if parameter_page == '🌡️ Temperatur':
           st.download_button('landuse.npz herunterladen', data=st.session_state['prepared_landuse'],
                              file_name='landuse.npz', mime='application/octet-stream')
   if LANDUSE_FILE.exists():
-        st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
-    else:
-        st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
+      st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
+  else:
+      st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
   enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
 else:
     enable_landuse = False
