@@ -1,5 +1,7 @@
 """ELBTAL DWD radar: original RX reflectivity and RY 5-minute precipitation."""
 import bz2
+import tarfile
+import h5py
 import io
 import re
 from datetime import datetime, timezone
@@ -15,7 +17,7 @@ import numpy as np
 import requests
 import streamlit as st
 from scipy.ndimage import map_coordinates
-from pyproj import Transformer
+from pyproj import Transformer, CRS
 from map_design import frame_png
 
 BASE="https://opendata.dwd.de/weather/radar/"
@@ -43,17 +45,17 @@ class Links(HTMLParser):
 @st.cache_data(ttl=120,show_spinner=False)
 def list_frames(product):
     # RX: measured reflectivity, RY: quality-corrected 5-min precipitation.
-    folder=BASE+("composite/rx/" if product=="RX" else "radolan/ry/")
+    folder=BASE+("composite/wn/" if product=="WN" else "radolan/ry/")
     response=requests.get(folder,headers=HEADERS,timeout=30)
     response.raise_for_status()
     parser=Links();parser.feed(response.text)
     found=[]
-    pattern=re.compile(r"raa01-"+product.lower()+r"_10000-(\d{10})-dwd---bin(?:\.bz2)?$",re.I)
+    pattern=(re.compile(r"composite_wn_(\d{8}_\d{4})\.tar$",re.I) if product=="WN" else re.compile(r"raa01-ry_10000-(\d{10})-dwd---bin\.hdf5$",re.I))
     for name in parser.names:
         match=pattern.search(name)
         if match:
             try:
-                stamp=datetime.strptime(match.group(1),"%y%m%d%H%M").replace(tzinfo=timezone.utc)
+                stamp=datetime.strptime(match.group(1),"%Y%m%d_%H%M" if product=="WN" else "%y%m%d%H%M").replace(tzinfo=timezone.utc)
             except ValueError:
                 continue
             found.append((stamp,urljoin(folder,name)))
@@ -61,49 +63,59 @@ def list_frames(product):
 
 @st.cache_data(ttl=900,show_spinner=False,max_entries=30)
 def load_frame(url,product):
-    response=requests.get(url,headers=HEADERS,timeout=55)
+    response=requests.get(url,headers=HEADERS,timeout=65)
     response.raise_for_status()
-    raw=bz2.decompress(response.content) if url.endswith(".bz2") else response.content
-    pos=raw.find(b"\x03")
-    if pos<0:
-        raise RuntimeError("RADOLAN-Datei ohne Header-Endmarke (ETX).")
-    header=raw[:pos].decode("latin1","replace")
-    if not header.startswith(product):
-        raise RuntimeError("Radarprodukt im Header stimmt nicht mit der Auswahl überein.")
-    payload=raw[pos+1:]
-    # RX is 8-bit rvp6 reflectivity; RY is unsigned 16-bit rainfall with flag bits.
-    if product=="RX":
-        if len(payload)!=900*900:
-            raise RuntimeError(f"RX-Rastergröße unerwartet: {len(payload)} Bytes.")
-        arr=np.frombuffer(payload,dtype=np.uint8).reshape((900,900))
-        values=arr.astype(np.float32)*.5-32.5
-        values[arr>=250]=np.nan
+    raw=response.content
+    if product=="WN":
+        with tarfile.open(fileobj=io.BytesIO(raw),mode="r:*") as archive:
+            members=[m for m in archive.getmembers() if m.isfile() and (m.name.endswith((".h5",".hdf5","-hd5")))]
+            if not members:
+                raise RuntimeError("WN-TAR enthält keine ODIM-HDF5-Radardatei.")
+            raw=archive.extractfile(members[0]).read()
+    with h5py.File(io.BytesIO(raw),"r") as h5:
+        where=h5["where"].attrs
+        xsize=int(where["xsize"]);ysize=int(where["ysize"])
+        proj=where["projdef"]
+        if isinstance(proj,bytes):proj=proj.decode()
+        crs=CRS.from_user_input(proj)
+        # ODIM defines the lower-left and upper-right pixel corner coordinates.
+        transformer=Transformer.from_crs("EPSG:4326",crs,always_xy=True)
+        x0,y0=transformer.transform(float(where["LL_lon"]),float(where["LL_lat"]))
+        x1,y1=transformer.transform(float(where["UR_lon"]),float(where["UR_lat"]))
+        group=h5["dataset1"]["data1"]
+        data=np.asarray(group["data"],dtype=np.float32)
+        if data.shape!=(ysize,xsize):
+            raise RuntimeError(f"ODIM-Raster hat {data.shape}, erwartet {(ysize,xsize)}.")
+        attrs=group["what"].attrs
+        quantity=attrs.get("quantity",b"")
+        if isinstance(quantity,bytes):quantity=quantity.decode()
+        if product=="WN" and quantity not in ("DBZH","TH","DBZ","DBZV"):
+            raise RuntimeError(f"WN-Feld {quantity!r} ist keine Reflektivität.")
+        if product=="RY" and quantity not in ("RATE","ACRR","DBZH",""):
+            raise RuntimeError(f"Unbekannte RY-Einheit {quantity!r}; keine sichere Umrechnung.")
+        nodata=float(attrs.get("nodata",np.nan))
+        undetect=float(attrs.get("undetect",np.nan))
+        missing=(data==nodata)|(data==undetect)
+        values=data*float(attrs["gain"])+float(attrs["offset"])
+        if product=="RY":
+            # RATE is already in mm/h; ACRR denotes a 5-minute accumulation.
+            if quantity=="ACRR":values*=12
+            elif quantity!="RATE":
+                raise RuntimeError(f"RY-Feld {quantity!r} hat keine gesicherte mm/h-Einheit.")
+        values[missing]=np.nan
         values[values<0]=np.nan
-    else:
-        if len(payload)!=900*900*2:
-            raise RuntimeError(f"RY-Rastergröße unerwartet: {len(payload)} Bytes.")
-        arr=np.frombuffer(payload,dtype="<u2").reshape((900,900))
-        # RADOLAN 16-bit flag masks: 0x1000 secondary, 0x2000 nodata,
-        # 0x4000 negative, 0x8000 clutter.
-        bad=((arr&0x2000)!=0)|((arr&0x8000)!=0)
-        precision_match=re.search(r"PR\s*E([+-]?\d+)",header)
-        if not precision_match:
-            raise RuntimeError("RY-Präzision (PR) fehlt im RADOLAN-Header.")
-        precision=10.0**int(precision_match.group(1))
-        values=(arr&0x0fff).astype(np.float32)*precision*12.0
-        values[bad]=np.nan
-    # RADOLAN file rows are ordered north to south.
-    return np.flipud(values.copy())
+        return values,(crs.to_string(),x0,y0,x1,y1)
 
 @st.cache_data(ttl=86400,show_spinner=False)
-def sample_geometry():
-    # Build lat/lon grid and project to the RADOLAN native 1 km raster.
+def sample_geometry(proj,x0,y0,x1,y1,shape):
     lon=np.linspace(5.4,15.6,800)
     lat=np.linspace(46.9,55.4,720)
     X,Y=np.meshgrid(lon,lat)
-    px,py=TRANSFORMER.transform(X,Y)
-    col=(px-X0)/1000
-    row=(py-Y0)/1000
+    transformer=Transformer.from_crs("EPSG:4326",CRS.from_user_input(proj),always_xy=True)
+    px,py=transformer.transform(X,Y)
+    ny,nx=shape
+    col=(px-x0)/(x1-x0)*nx-.5
+    row=(y1-py)/(y1-y0)*ny-.5
     return X,Y,row,col
 
 def draw_boundaries(ax):
@@ -117,13 +129,13 @@ def draw_boundaries(ax):
             # Missing boundary service must not change actual radar values.
             pass
 
-def render(values,product,stamp):
-    X,Y,row,col=sample_geometry()
-    valid=(row>=0)&(row<=899)&(col>=0)&(col<=899)
+def render(values,geo,product,stamp):
+    X,Y,row,col=sample_geometry(*geo,values.shape)
+    valid=(row>=0)&(row<values.shape[0])&(col>=0)&(col<values.shape[1])
     sampled=map_coordinates(np.nan_to_num(values,nan=-9999),[row,col],
                             order=0,mode="constant",cval=-9999)
     sampled=np.where(valid & (sampled>=0),sampled,np.nan)
-    bounds=DBZ_BOUNDS if product=="RX" else RATE_BOUNDS
+    bounds=DBZ_BOUNDS if product=="WN" else RATE_BOUNDS
     cmap=ListedColormap(COLORS)
     cmap.set_bad("#10273e")
     norm=BoundaryNorm(bounds,cmap.N)
@@ -142,7 +154,7 @@ def render(values,product,stamp):
     fig.subplots_adjust(left=.09,right=.98,top=.96,bottom=.19)
     cb=fig.colorbar(image,ax=ax,orientation="horizontal",pad=.09,
                     fraction=.045,aspect=35,spacing="uniform",
-                    ticks=[0,10,20,30,40,50,60,70] if product=="RX"
+                    ticks=[0,10,20,30,40,50,60,70] if product=="WN"
                     else [0,.5,1,2,5,10,20,50,100])
     cb.ax.tick_params(colors="#d6e5f2",labelsize=8)
     cb.set_label("Radarreflektivität (dBZ)" if product=="RX" else "Niederschlagsintensität (mm/h) · 5-Minuten-Mittel",color="#d6e5f2")
@@ -156,8 +168,8 @@ def show():
     st.subheader("📡 ELBTAL | Regenradar Deutschland")
     mode=st.segmented_control("Radarprodukt",["Reflektivität (dBZ)","Regenrate (mm/h)"],
                               default="Reflektivität (dBZ)",key="radar_mode")
-    product="RX" if mode=="Reflektivität (dBZ)" else "RY"
-    st.caption("DWD-Radarverbund · gemessene Radarreflektivität (RX) oder qualitätskorrigierte Niederschlagsmenge (RY), auf mm/h umgerechnet. 1-km-Raster, neue Aufnahme ungefähr alle 5 Minuten. Kein Wettermodell.")
+    product="WN" if mode=="Reflektivität (dBZ)" else "RY"
+    st.caption("DWD-Radarverbund · gemessene Radarreflektivität (WN) oder qualitätskorrigierte Niederschlagsmenge (RY), auf mm/h umgerechnet. 1-km-Raster, neue Aufnahme ungefähr alle 5 Minuten. Kein Wettermodell.")
     try:
         frames=list_frames(product)
     except Exception as exc:
@@ -174,8 +186,8 @@ def show():
     if st.button("📡 Radaraufnahme laden",type="primary"):
         try:
             with st.spinner("Originale DWD-Radardaten werden geladen …"):
-                data=load_frame(url,product)
-                png=render(data,product,stamp)
+                data,geo=load_frame(url,product)
+                png=render(data,geo,product,stamp)
             st.session_state["radar_image"]=(url,png)
         except Exception as exc:
             st.error(f"Radaraufnahme nicht darstellbar: {type(exc).__name__}: {exc}")
