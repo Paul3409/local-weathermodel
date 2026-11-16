@@ -31,7 +31,15 @@ def stations():
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def hourly_temperature(station_id):
-    url = BASE + f"stundenwerte_TU_{station_id}_akt.zip"
+    """Read DWD CDC recent hourly temperature ZIP, discovering its dated filename."""
+    listing = requests.get(BASE, headers=HEADERS, timeout=25)
+    listing.raise_for_status()
+    # DWD CDC ZIPs have a date range in their filenames, not an '_akt' suffix.
+    matches = re.findall(r'href=["\\\']([^"\\\']*stundenwerte_TU_' + re.escape(str(station_id).zfill(5)) + r'_[^"\\\']*?\\.zip)["\\\']', listing.text, re.I)
+    if not matches:
+        raise FileNotFoundError(f'Keine aktuelle DWD-Temperaturdatei für Station {station_id}')
+    from urllib.parse import urljoin
+    url = urljoin(BASE, sorted(matches)[-1])
     response = requests.get(url, headers=HEADERS, timeout=35)
     response.raise_for_status()
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
@@ -44,6 +52,7 @@ def hourly_temperature(station_id):
     df["time"] = pd.to_datetime(df["MESS_DATUM"].astype(str).str.strip(), format="%Y%m%d%H", utc=True, errors="coerce")
     df["temperature"] = pd.to_numeric(df["TT_TU"], errors="coerce").replace(-999, float("nan"))
     return df[["time","temperature"]].dropna()
+
 
 def station_grid_value(X, Y, Z, lat, lon):
     import numpy as np
