@@ -555,14 +555,14 @@ if map_region in ('Deutschland','Europa'):
     show_icon_eu(map_region)
     st.stop()
 st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
-parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','❄️ Art','💦 Taupunkt','🌫️ Nebel'], default='🌡️ Temperatur', selection_mode='single')
+parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','🌦️ Signifikantes Wetter','💦 Taupunkt','🌫️ Nebel'], default='🌡️ Temperatur', selection_mode='single')
 is_gust = parameter_page == '🌬️ Windböen'
-is_precip = parameter_page in ('🌧️ Rate','💧 Summe','❄️ Art')
-is_kind = parameter_page == '❄️ Art'
+is_precip = parameter_page in ('🌧️ Rate','💧 Summe')
+is_kind = parameter_page == '🌦️ Signifikantes Wetter'
 is_dew = parameter_page == '💦 Taupunkt'
 is_fog = parameter_page == '🌫️ Nebel'
-st.subheader({'🌡️ Temperatur':'🌡️ 2-m-Temperatur (°C)','🌬️ Windböen':'🌬️ Windböen (km/h)','🌧️ Rate':'🌧️ Stündliche Niederschlagsintensität (mm/h)','💧 Summe':'💧 Niederschlagssumme (mm)','❄️ Art':'🌦️ Signifikantes Wetter (DWD WW)','💦 Taupunkt':'💦 2-m-Taupunkt (°C)','🌫️ Nebel':'🌫️ Nebelpotenzial (experimentell)'}[parameter_page])
-if not is_gust and not is_precip and not is_dew and not is_fog:
+st.subheader({'🌡️ Temperatur':'🌡️ 2-m-Temperatur (°C)','🌬️ Windböen':'🌬️ Windböen (km/h)','🌧️ Rate':'🌧️ Stündliche Niederschlagsintensität (mm/h)','💧 Summe':'💧 Niederschlagssumme (mm)','🌦️ Signifikantes Wetter':'🌦️ Signifikantes Wetter (DWD WW)','💦 Taupunkt':'💦 2-m-Taupunkt (°C)','🌫️ Nebel':'🌫️ Nebelpotenzial (experimentell)'}[parameter_page])
+if not is_gust and not is_precip and not is_kind and not is_dew and not is_fog:
     st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte WorldCover-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
 if parameter_page == '🌡️ Temperatur':
   with st.expander('Landnutzung einmalig vorbereiten', expanded=False):
@@ -607,7 +607,8 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             diagnostics = []
             for run in find_runs():
                 try:
-                    files, examples, matching = list_run(run, 'ww' if is_kind else ('tot_prec' if is_precip else ('td_2m' if is_dew else ('t_2m' if is_fog else ('vmax_10m' if is_gust else 't_2m'))))))
+                    field_name = 'ww' if is_kind else ('tot_prec' if is_precip else ('td_2m' if is_dew else ('t_2m' if is_fog else ('vmax_10m' if is_gust else 't_2m'))))
+                    files, examples, matching = list_run(run, field_name)
                     requested = list(range(start_hour, end_hour + 1))
                     if is_precip and parameter_page == '🌧️ Rate' and start_hour > 0:
                         requested = [start_hour-1] + requested
@@ -662,7 +663,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             images = []
             terrain = None
             try:
-                if is_gust or is_precip or is_dew or is_fog:
+                if is_gust or is_precip or is_kind or is_dew or is_fog:
                     raise ValueError('Für diesen Parameter nicht benötigt')
                 terrain = get_terrain()
                 st.write(f'Geländedaten geladen: {terrain.min():.0f} bis {terrain.max():.0f} m')
@@ -679,7 +680,8 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             precip_previous = None
             for idx, hour in enumerate(hours):
                 st.write(f'Lade Daten +{hour} h ({idx+1}/{len(hours)}) …')
-                messages = decode_grib(files[hour], 'ww' if is_kind else ('tot_prec' if is_precip else ('td_2m' if is_dew or is_fog else ('vmax_10m' if is_gust else 't_2m')))
+                field_name = 'ww' if is_kind else ('tot_prec' if is_precip else ('td_2m' if is_dew or is_fog else ('vmax_10m' if is_gust else 't_2m')))
+                messages = decode_grib(files[hour], field_name)
                 # Select the exact hourly forecast time, never a neighboring quarter-hour.
                 target = run + timedelta(hours=hour)
                 msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
@@ -784,7 +786,7 @@ if image_key in st.session_state:
                               format_func=lambda i: labels[i], key='hour_'+image_key)
     st.caption(f'Ausgewählt: {labels[choice]}')
     h, valid, original_png, local_png, combined_png, diff_png = images[choice]
-    variants = {parameter_page: original_png} if (is_precip or is_dew or is_fog) else ({'ICON-D2 Windböen': original_png} if is_gust else {'ICON-D2 (interpoliert)': original_png})
+    variants = {parameter_page: original_png} if (is_precip or is_kind or is_dew or is_fog) else ({'ICON-D2 Windböen': original_png} if is_gust else {'ICON-D2 (interpoliert)': original_png})
     if local_png is not None and parameter_page == '🌡️ Temperatur':
         variants['Höhenkorrektur'] = local_png
     if combined_png is not None and parameter_page == '🌡️ Temperatur':
