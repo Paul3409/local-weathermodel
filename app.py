@@ -1,4 +1,5 @@
 from map_design import style_figure, frame_png
+from app_version import VERSION
 """ELBTAL-T2M v0.5.3 – ESA WorldCover offline land-use raster."""
 import bz2
 import io
@@ -614,7 +615,7 @@ def render_fog(X,Y,Z,run,valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌦️ ELBTAL · v1.0.0')
+st.title(f'🌦️ ELBTAL · V{VERSION}')
 map_region = st.segmented_control('Kartengebiet', options=['Elbtal','KRUMET','Deutschland','Europa','🌍 Globalmodelle','📡 Radar'], default='Elbtal', selection_mode='single')
 if map_region == '📡 Radar':
     from radar import show as show_radar
