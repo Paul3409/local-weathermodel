@@ -539,7 +539,7 @@ def render_fog(X,Y,Z,run,valid):
     ax.grid(color='white',alpha=.2,linewidth=.5)
     fig.suptitle('ELBTAL | Nebelpotenzial (experimentell)',fontsize=14,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=9)
-    fig.text(.5,.025,'Heuristik: Feuchte/Wind; Regen gesondert · keine Nebelwahrscheinlichkeit',ha='center',fontsize=8)
+    fig.text(.5,.025,'Heuristik: Feuchte/Wind/optional tiefe Wolken · Regen separat · keine Nebelwahrscheinlichkeit',ha='center',fontsize=8)
     out=io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
     plt.close(fig)
@@ -584,13 +584,16 @@ else:
     elif is_dew:
         st.caption('ICON-D2-Taupunkt in 2 m Höhe, direktes Modellfeld ohne lokale Korrektur.')
     elif is_fog:
-        st.caption('Experimenteller Nebelindikator aus Taupunktdifferenz und 10-m-Wind. Niederschlag wird gesondert markiert; keine Sichtweitenprognose oder Nebelwahrscheinlichkeit.')
+        st.caption('Experimenteller Nebel-/Hochnebelindikator aus Taupunktdifferenz, Wind und optional tiefer Bewölkung (CLCL). Niederschlag wird gesondert markiert; keine Sichtweitenprognose oder Nebelwahrscheinlichkeit.')
     elif is_kind:
         st.caption('Niederschlagsart aus stündlichen Regen-/Schneeanteilen; Graupel und unklare Fälle grau. Gefrierender Regen wird nicht diagnostiziert.')
     else:
         st.caption('ICON-D2-Niederschlag als Wasseräquivalent. Rate = stündliche Akkumulationsdifferenz.')
-start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +12 h)', options=list(range(13)), value=(0, 6), format_func=lambda h: f'+{h} h')
-st.caption(f'Es werden Karten nur für +{start_hour} bis +{end_hour} erstellt. Für Niederschlagsraten wird zusätzlich der jeweils vorherige Akkumulationsstand geladen.')
+# Display an indicative local valid time while choosing lead hours; the exact run is shown after loading.
+preview_run = find_runs()[0]
+st.caption(f'Orientierung: Modelllauf {preview_run:%d.%m.%Y %H:%M} UTC. Bei fehlenden Dateien wird automatisch ein älterer Lauf gewählt; die endgültigen Zeiten stehen an den Karten.')
+start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +24 h)', options=list(range(25)), value=(0, 6), format_func=lambda h: f'+{h} h · {(preview_run+timedelta(hours=h)).astimezone(TZ):%d.%m. %H:%M %Z}')
+st.caption(f'Gewählte Zeitspanne: {(preview_run+timedelta(hours=start_hour)).astimezone(TZ):%d.%m.%Y %H:%M %Z} bis {(preview_run+timedelta(hours=end_hour)).astimezone(TZ):%d.%m.%Y %H:%M %Z} (vorläufig). Es werden Karten nur für +{start_hour} bis +{end_hour} erstellt. Für Niederschlagsraten wird zusätzlich der jeweils vorherige Akkumulationsstand geladen.')
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
     with st.status('Suche verfügbaren DWD-Modelllauf …', expanded=True) as status:
         try:
@@ -637,6 +640,16 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                         st.warning('Niederschlagsdateien unvollständig: Nebelindikator ohne Regenabgrenzung.')
                 except requests.RequestException:
                     st.warning('Niederschlagsdaten nicht erreichbar: Nebelindikator ohne Regenabgrenzung.')
+                fog_cloud_files = {}
+                for p in ('clcl',):
+                    try:
+                        found,_,_ = list_run(run,p)
+                        if all(h in found for h in hours):
+                            fog_cloud_files[p] = found
+                        else:
+                            st.info('Tiefe Bewölkung ist nicht für alle Stunden verfügbar; Basisindikator bleibt aktiv.')
+                    except requests.RequestException:
+                        st.info('Tiefe Bewölkung aktuell nicht verfügbar; Basisindikator bleibt aktiv.')
                 fog_precip_previous = None
                 fog_precip_previous_hour = None
             st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
@@ -731,6 +744,17 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     categories[score>=.2]=1
                     categories[score>=.45]=2
                     categories[score>=.7]=3
+                    # CLCL is low-level cloud fraction, not proof of fog at ground level.
+                    if 'clcl' in fog_cloud_files:
+                        try:
+                            cloud_records=decode_grib(fog_cloud_files['clcl'][hour],'clcl')
+                            cloud_record=min(cloud_records,key=lambda m:abs((m[3]-target).total_seconds()))
+                            if abs((cloud_record[3]-target).total_seconds())<=60:
+                                low_cloud=interpolate(*cloud_record[:3])[2]
+                                # Strong low-cloud cover with nearly saturated air: retain a fog/high-stratus signal.
+                                categories[(low_cloud>=70)&(spread<=1.5)&(wind<=12)] = np.maximum(categories[(low_cloud>=70)&(spread<=1.5)&(wind<=12)],2)
+                        except (requests.RequestException,ValueError,RuntimeError) as cloud_error:
+                            st.warning(f'Tiefe Bewölkung +{hour} h nicht verarbeitet: {cloud_error}. Basisindikator bleibt aktiv.')
                     # Distinguish precipitation-associated saturation from fog-favourable conditions.
                     if fog_precip_files and hour>0:
                         def fog_accumulation(lead):
