@@ -130,7 +130,7 @@ def decode_grib(url, parameter='t_2m'):
     return messages
 
 
-def interpolate(lats, lons, vals, grid_m=None):
+def interpolate(lats, lons, vals, grid_m=None, categorical=False):
     # Only a buffered area is needed; keep the download decoding manageable.
     keep = (lats >= LAT_MIN-.09) & (lats <= LAT_MAX+.09) & (lons >= LON_MIN-.09) & (lons <= LON_MAX+.09)
     if keep.sum() < 6:
@@ -141,7 +141,7 @@ def interpolate(lats, lons, vals, grid_m=None):
     lon_axis = np.linspace(LON_MIN, LON_MAX, nlon)
     X, Y = np.meshgrid(lon_axis, lat_axis)
     # Linear spatial interpolation, not physical 100 m downscaling.
-    grid = griddata(np.column_stack([lons[keep], lats[keep]]), vals[keep], (X, Y), method='linear')
+    grid = griddata(np.column_stack([lons[keep], lats[keep]]), vals[keep], (X, Y), method='nearest' if categorical else 'linear')
     if np.isnan(grid).any():
         nearest = griddata(np.column_stack([lons[keep], lats[keep]]), vals[keep], (X, Y), method='nearest')
         grid = np.where(np.isnan(grid), nearest, grid)
@@ -434,7 +434,7 @@ def render_gust(X,Y,Z,run,valid,show_km_values=False):
 
 PREC_RATE = [(0,'#F2F5F7'),(.1,'#C8EAF7'),(.5,'#80C9EC'),(1,'#368DD1'),(2,'#2269A9'),(5,'#3B9A68'),(10,'#C4C948'),(15,'#F1D34E'),(20,'#F3A04A'),(30,'#E85A38'),(50,'#C72F43'),(75,'#83215F'),(100,'#C137A8')]
 PREC_SUM = [(0,'#F2F5F7'),(.5,'#D1F2ED'),(1,'#91DCD8'),(2,'#51B9D4'),(5,'#3787C1'),(10,'#2465A0'),(15,'#3D986A'),(20,'#A8C34E'),(30,'#E6D14B'),(40,'#F1A24D'),(50,'#E46840'),(75,'#C43D53'),(100,'#793A94')]
-PREC_KIND_COLORS = ['#F2F5F7','#278DCE','#F39A43','#F4A4CF','#D93455','#8C949F']
+from significant_weather import classify_ww, palette, legend_handles
 
 
 def classify_precipitation(hourly_total, hourly_rain, hourly_snow, hourly_graupel):
@@ -464,14 +464,12 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
     from matplotlib.colors import ListedColormap, BoundaryNorm
     fig,ax=plt.subplots(figsize=(9,9.3),dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
-    if parameter_page == '❄️ Art':
-        cmap=ListedColormap(PREC_KIND_COLORS)
-        bounds=np.arange(-.5,6.5,1)
-        filled=ax.contourf(X,Y,Z,levels=bounds,cmap=cmap,norm=BoundaryNorm(bounds,6))
-        cb=fig.colorbar(filled,ax=ax,orientation='horizontal',fraction=.055,pad=.09)
-        cb.set_ticks(range(6))
-        cb.set_ticklabels(['Trocken','Regen','Schneeregen','Schnee','Gefr. Regen','Unbestimmt'])
-        cb.ax.tick_params(labelsize=6)
+    if parameter_page == '🌦️ Signifikantes Wetter':
+        cmap,norm,bounds=palette()
+        filled=ax.pcolormesh(X,Y,Z,cmap=cmap,norm=norm,shading="nearest",rasterized=True)
+        fig.subplots_adjust(bottom=.25)
+        fig.legend(handles=legend_handles(),loc="lower center",ncol=4,fontsize=6,
+                   frameon=False,bbox_to_anchor=(.5,.035),columnspacing=.8,handlelength=1.4)
     else:
         stops=PREC_RATE if parameter_page=='🌧️ Rate' else PREC_SUM
         vmax=100
@@ -512,7 +510,7 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
 
 
 IMAGE_KEYS = {'🌡️ Temperatur':'images_temp','🌬️ Windböen':'images_gust',
-              '🌧️ Rate':'images_rate','💧 Summe':'images_sum','❄️ Art':'images_kind',
+              '🌧️ Rate':'images_rate','💧 Summe':'images_sum','🌦️ Signifikantes Wetter':'images_kind',
               '💦 Taupunkt':'images_dew','🌫️ Nebel':'images_fog'}
 
 
@@ -563,7 +561,7 @@ is_precip = parameter_page in ('🌧️ Rate','💧 Summe','❄️ Art')
 is_kind = parameter_page == '❄️ Art'
 is_dew = parameter_page == '💦 Taupunkt'
 is_fog = parameter_page == '🌫️ Nebel'
-st.subheader({'🌡️ Temperatur':'🌡️ 2-m-Temperatur (°C)','🌬️ Windböen':'🌬️ Windböen (km/h)','🌧️ Rate':'🌧️ Stündliche Niederschlagsintensität (mm/h)','💧 Summe':'💧 Niederschlagssumme (mm)','❄️ Art':'❄️ Niederschlagsart (Modellschätzung)','💦 Taupunkt':'💦 2-m-Taupunkt (°C)','🌫️ Nebel':'🌫️ Nebelpotenzial (experimentell)'}[parameter_page])
+st.subheader({'🌡️ Temperatur':'🌡️ 2-m-Temperatur (°C)','🌬️ Windböen':'🌬️ Windböen (km/h)','🌧️ Rate':'🌧️ Stündliche Niederschlagsintensität (mm/h)','💧 Summe':'💧 Niederschlagssumme (mm)','❄️ Art':'🌦️ Signifikantes Wetter (DWD WW)','💦 Taupunkt':'💦 2-m-Taupunkt (°C)','🌫️ Nebel':'🌫️ Nebelpotenzial (experimentell)'}[parameter_page])
 if not is_gust and not is_precip and not is_dew and not is_fog:
     st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte WorldCover-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
 if parameter_page == '🌡️ Temperatur':
@@ -594,7 +592,7 @@ else:
     elif is_fog:
         st.caption('Experimenteller Nebel-/Hochnebelindikator aus Taupunktdifferenz, Wind und optional tiefer Bewölkung (CLCL). Niederschlag wird gesondert markiert; keine Sichtweitenprognose oder Nebelwahrscheinlichkeit.')
     elif is_kind:
-        st.caption('Niederschlagsart aus stündlichen Regen-/Schneeanteilen; Graupel und unklare Fälle grau. Gefrierender Regen wird nicht diagnostiziert.')
+        st.caption('Signifikantes Wetter aus dem originalen DWD-ICON-D2-WW-Feld. Nebel mit Reifbildung als Nebel zusammengefasst; keine Kategorie Gewitter in der Nähe. WW ist eine Diagnose der vergangenen Stunde.')
     else:
         st.caption('ICON-D2-Niederschlag als Wasseräquivalent. Rate = stündliche Akkumulationsdifferenz.')
 # Display an indicative local valid time while choosing lead hours; the exact run is shown after loading.
@@ -609,9 +607,9 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             diagnostics = []
             for run in find_runs():
                 try:
-                    files, examples, matching = list_run(run, 'tot_prec' if is_precip else ('td_2m' if is_dew else ('t_2m' if is_fog else ('vmax_10m' if is_gust else 't_2m'))))
+                    files, examples, matching = list_run(run, 'ww' if is_kind else ('tot_prec' if is_precip else ('td_2m' if is_dew else ('t_2m' if is_fog else ('vmax_10m' if is_gust else 't_2m'))))))
                     requested = list(range(start_hour, end_hour + 1))
-                    if is_precip and (is_kind or parameter_page == '🌧️ Rate') and start_hour > 0:
+                    if is_precip and parameter_page == '🌧️ Rate' and start_hour > 0:
                         requested = [start_hour-1] + requested
                     available = [h for h in requested if h in files]
                     diagnostics.append(f'{run:%Y-%m-%d %H} UTC: {len(files)} Dateien; Stunden {available}; Beispiele: {matching or examples}')
@@ -626,7 +624,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 raise RuntimeError(f'Kein ICON-D2-Lauf mit allen Stunden +{start_hour} bis +{end_hour} gefunden. Siehe DWD-Diagnose oben.')
             run, files, hours = selected
             if is_precip:
-                hours = list(range(max(0,start_hour-1),end_hour+1)) if (is_kind or parameter_page == '🌧️ Rate') else list(range(start_hour,end_hour+1))
+                hours = list(range(max(0,start_hour-1),end_hour+1)) if parameter_page == '🌧️ Rate' else list(range(start_hour,end_hour+1))
                 if any(h not in files for h in hours):
                     raise RuntimeError('Benötigte Niederschlagsdateien fehlen.')
             if is_fog:
@@ -679,37 +677,19 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 except Exception as land_error:
                     st.warning(f'Gespeicherte Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
             precip_previous = None
-            phase_previous = {}
-            phase_files = {}
-            if is_kind:
-                for component in ('rain_gsp','rain_con','snow_gsp','snow_con','grau_gsp'):
-                    available_files,_,_ = list_run(run,component)
-                    if any(h not in available_files for h in hours):
-                        raise RuntimeError(f'Für Niederschlagsart fehlen Daten: {component} in ausgewählter Spanne.')
-                    phase_files[component] = available_files
             for idx, hour in enumerate(hours):
                 st.write(f'Lade Daten +{hour} h ({idx+1}/{len(hours)}) …')
-                messages = decode_grib(files[hour], 'tot_prec' if is_precip else ('td_2m' if is_dew or is_fog else ('vmax_10m' if is_gust else 't_2m')))
+                messages = decode_grib(files[hour], 'ww' if is_kind else ('tot_prec' if is_precip else ('td_2m' if is_dew or is_fog else ('vmax_10m' if is_gust else 't_2m')))
                 # Select the exact hourly forecast time, never a neighboring quarter-hour.
                 target = run + timedelta(hours=hour)
                 msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
                 if abs((msg[3]-target).total_seconds()) > 60:
                     raise RuntimeError(f'Kein exakter Prognosezeitpunkt für +{hour} h vorhanden.')
-                X, Y, Z = interpolate(*msg[:3],grid_m=500 if is_fog else None)
-                if is_precip:
-                    if is_kind:
-                        increments = {}
-                        for component,component_files in phase_files.items():
-                            component_messages = decode_grib(component_files[hour],component)
-                            component_msg = min(component_messages,key=lambda m: abs((m[3]-target).total_seconds()))
-                            if abs((component_msg[3]-target).total_seconds()) > 60:
-                                raise RuntimeError(f'Zeitstempel stimmt nicht: {component} +{hour} h.')
-                            _,_,component_grid = interpolate(*component_msg[:3])
-                            if component in phase_previous:
-                                increments[component] = np.maximum(component_grid-phase_previous[component],0)
-                            else:
-                                increments[component] = np.zeros_like(component_grid)
-                            phase_previous[component] = component_grid
+                X, Y, Z = interpolate(*msg[:3],grid_m=500 if is_fog else None,categorical=is_kind)
+                if is_kind:
+                    display=classify_ww(Z)
+                    original_png=(render_precip(X,Y,display,run,msg[3],parameter_page),)*2
+                elif is_precip:
                     # TOT_PREC is the accumulated water equivalent since model initialization.
                     # Each hourly difference is a one-hour mean rate in mm/h.
                     if not np.isfinite(Z).all():
@@ -725,15 +705,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     if hour < start_hour:
                         continue
                     display = hourly if parameter_page == '🌧️ Rate' else Z
-                    if is_kind:
-                        # Separate rain/snow components are needed; no temperature-only guessing.
-                        display = classify_precipitation(hourly,
-                            increments['rain_gsp']+increments['rain_con'],
-                            increments['snow_gsp']+increments['snow_con'],
-                            increments['grau_gsp'])
-                        original_png = (render_precip(X,Y,display,run,msg[3],parameter_page),)*2
-                    else:
-                        original_png = tuple(render_precip(X,Y,display,run,msg[3],parameter_page,flag) for flag in (False,True))
+                    original_png = tuple(render_precip(X,Y,display,run,msg[3],parameter_page,flag) for flag in (False,True))
                 elif is_fog:
                     def load_fog_field(parameter):
                         records=decode_grib(fog_files[parameter][hour],parameter)
