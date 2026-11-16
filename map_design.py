@@ -155,7 +155,8 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
     fy=height-footer_h+u(12)
     panel(16,fy,base_width-16,fy+52)
     src=source or ("DWD" if model.startswith("ICON") else "NOAA")
-    text(35,fy+16,f"Daten: {src} ({model})    |    Region: {region}",14,MUTED)
+    source_label = "DWD RADOLAN" if model == "DWD RADOLAN" else f"{src} ({model})"
+    text(35,fy+16,f"Daten: {source_label}    |    Region: {region}",14,MUTED)
     brand="ELBTAL v1.0"
     bb=d.textbbox((0,0),brand,font=_font(u(20),True))
     d.text((width-u(37)-(bb[2]-bb[0]),u(fy+12)),brand,font=_font(u(20),True),fill=WHITE)
