@@ -111,7 +111,7 @@ def decode_grib(url, parameter='t_2m'):
                     lats = np.asarray(codes_get_array(gid, 'latitudes'), dtype=float)
                     lons = np.asarray(codes_get_array(gid, 'longitudes'), dtype=float)
                     vals = np.asarray(codes_get_array(gid, 'values'), dtype=float)
-                    vals = vals - 273.15 if parameter == 't_2m' else vals * 3.6
+                    vals = vals - 273.15 if parameter == 't_2m' else (vals * 3.6 if parameter == 'vmax_10m' else vals)
                     valid_date = int(codes_get(gid, 'validityDate'))
                     valid_time = int(codes_get(gid, 'validityTime'))
                     valid = datetime.strptime(f'{valid_date:08d}{valid_time:04d}', '%Y%m%d%H%M').replace(tzinfo=timezone.utc)
@@ -428,13 +428,94 @@ def render_gust(X,Y,Z,run,valid,show_km_values=False):
     return out.getvalue()
 
 
+
+PREC_RATE = [(0,'#F2F5F7'),(.1,'#C8EAF7'),(.5,'#80C9EC'),(1,'#368DD1'),(2,'#2269A9'),(5,'#3B9A68'),(10,'#C4C948'),(15,'#F1D34E'),(20,'#F3A04A'),(30,'#E85A38'),(50,'#C72F43'),(75,'#83215F'),(100,'#C137A8')]
+PREC_SUM = [(0,'#F2F5F7'),(.5,'#D1F2ED'),(1,'#91DCD8'),(2,'#51B9D4'),(5,'#3787C1'),(10,'#2465A0'),(15,'#3D986A'),(20,'#A8C34E'),(30,'#E6D14B'),(40,'#F1A24D'),(50,'#E46840'),(75,'#C43D53'),(100,'#793A94')]
+PREC_KIND_COLORS = ['#F2F5F7','#278DCE','#F39A43','#F4A4CF','#D93455','#8C949F']
+
+
+def classify_precipitation(hourly_total, hourly_rain, hourly_snow, hourly_graupel):
+    """Classify hourly increments, not cumulative model-run totals.
+
+    0 dry, 1 rain, 2 mixed rain/snow, 3 snow, 5 uncertain.
+    Graupel is not silently counted as rain or snow. Freezing rain requires
+    independent WW diagnostics and is not asserted here.
+    """
+    result = np.full(hourly_total.shape, 5, dtype=int)
+    wet = hourly_total >= .05
+    result[~wet] = 0
+    known = hourly_rain + hourly_snow
+    graupel_significant = hourly_graupel > np.maximum(.02, .1 * hourly_total)
+    valid = wet & (known > .02) & ~graupel_significant
+    # Unaccounted precipitation may include additional hydrometeors.
+    valid &= np.abs(hourly_total - known - hourly_graupel) <= np.maximum(.1, .2 * hourly_total)
+    snow_fraction = hourly_snow / np.maximum(known, 1e-9)
+    result[valid & (snow_fraction < .1)] = 1
+    result[valid & (snow_fraction >= .1) & (snow_fraction <= .9)] = 2
+    result[valid & (snow_fraction > .9)] = 3
+    return result
+
+
+
+def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
+    from matplotlib.colors import ListedColormap, BoundaryNorm
+    fig,ax=plt.subplots(figsize=(9,9.3),dpi=150)
+    fig.patch.set_facecolor('#f6f8fa')
+    if parameter_page == '❄️ Art':
+        cmap=ListedColormap(PREC_KIND_COLORS)
+        bounds=np.arange(-.5,6.5,1)
+        filled=ax.contourf(X,Y,Z,levels=bounds,cmap=cmap,norm=BoundaryNorm(bounds,6))
+        cb=fig.colorbar(filled,ax=ax,orientation='horizontal',fraction=.055,pad=.09)
+        cb.set_ticks(range(6))
+        cb.set_ticklabels(['Trocken','Regen','Schneeregen','Schnee','Gefr. Regen','Unbestimmt'])
+        cb.ax.tick_params(labelsize=6)
+    else:
+        stops=PREC_RATE if parameter_page=='🌧️ Rate' else PREC_SUM
+        vmax=100
+        cmap=LinearSegmentedColormap.from_list('precip',[(v/vmax,col) for v,col in stops],N=2048)
+        cmap.set_over(stops[-1][1])
+        norm=Normalize(0,vmax)
+        filled=ax.contourf(X,Y,Z,levels=np.linspace(0,vmax,501),cmap=cmap,norm=norm,extend='max')
+        zmin,zmax=float(np.nanmin(Z)),float(np.nanmax(Z))
+        boundaries=[v for v,_ in stops[1:] if zmin<v<zmax]
+        if boundaries:
+            ax.contour(X,Y,Z,levels=boundaries,colors='#293748',linewidths=.5,alpha=.7)
+        if show_km_values:
+            draw_km_temperatures(ax,X,Y,Z)
+        cb=fig.colorbar(filled,ax=ax,orientation='horizontal',fraction=.055,pad=.09)
+        cb.set_ticks([0,.5,1,2,5,10,20,30,50,75,100])
+        cb.ax.tick_params(labelsize=7)
+        cb.set_label('mm/h (stündliches Mittel)' if parameter_page=='🌧️ Rate' else 'mm = l/m² (seit Modellstart)')
+    for name,(lat,lon) in PLACES.items():
+        if LAT_MIN<=lat<=LAT_MAX and LON_MIN<=lon<=LON_MAX:
+            ax.plot(lon,lat,'o',color='#101828',markersize=2.5,zorder=12)
+            ax.annotate(name,(lon,lat),xytext=(4,4),textcoords='offset points',
+                        fontsize=8,weight='bold',color='#15263a',zorder=13,
+                        bbox=dict(facecolor='white',alpha=.9,edgecolor='none',pad=1))
+    ax.set_xlim(LON_MIN,LON_MAX)
+    ax.set_ylim(LAT_MIN,LAT_MAX)
+    ax.set_aspect(1/np.cos(np.deg2rad((LAT_MIN+LAT_MAX)/2)))
+    ax.set_xlabel('Längengrad (°O)')
+    ax.set_ylabel('Breitengrad (°N)')
+    ax.grid(color='white',alpha=.2,linewidth=.5)
+    fig.suptitle('ELBTAL  |  '+parameter_page,fontsize=16,weight='bold',y=.98)
+    ax.set_title(f'ICON-D2 · Lauf {run:%d.%m.%Y %H:%M} UTC · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=8,pad=12)
+    fig.text(.5,.025,'DWD ICON-D2 · Modellwerte, keine Messungen',ha='center',fontsize=8,color='#48566a')
+    out=io.BytesIO()
+    fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
+    plt.close(fig)
+    return out.getvalue()
+
+
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL · v0.6.0')
+st.title('🌦️ ELBTAL · v0.7.0')
 st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
-parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen'], default='🌡️ Temperatur', selection_mode='single')
+parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','❄️ Art'], default='🌡️ Temperatur', selection_mode='single')
 is_gust = parameter_page == '🌬️ Windböen'
-st.subheader('🌬️ Windböen (km/h)' if is_gust else '🌡️ 2-m-Temperatur (°C)')
-if not is_gust:
+is_precip = parameter_page in ('🌧️ Rate','💧 Summe','❄️ Art')
+is_kind = parameter_page == '❄️ Art'
+st.subheader({'🌡️ Temperatur':'🌡️ 2-m-Temperatur (°C)','🌬️ Windböen':'🌬️ Windböen (km/h)','🌧️ Rate':'🌧️ Stündliche Niederschlagsintensität (mm/h)','💧 Summe':'💧 Niederschlagssumme (mm)','❄️ Art':'❄️ Niederschlagsart (Modellschätzung)'}[parameter_page])
+if not is_gust and not is_precip:
     st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte WorldCover-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
 with st.expander('Landnutzung einmalig vorbereiten', expanded=False):
     st.write('Einmalige ESA-WorldCover-Abfrage; anschließend die erzeugte NPZ-Datei unter `data/landuse.npz` in GitHub hochladen. Bei regulären Prognosen wird kein Landnutzungsserver aufgerufen.')
@@ -449,7 +530,7 @@ with st.expander('Landnutzung einmalig vorbereiten', expanded=False):
     if 'prepared_landuse' in st.session_state:
         st.download_button('landuse.npz herunterladen', data=st.session_state['prepared_landuse'],
                            file_name='landuse.npz', mime='application/octet-stream')
-if not is_gust:
+if not is_gust and not is_precip:
     if LANDUSE_FILE.exists():
         st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
     else:
@@ -457,7 +538,12 @@ if not is_gust:
     enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
 else:
     enable_landuse = False
-    st.caption('DWD-ICON-D2-Windböen ohne experimentelle Temperaturkorrekturen.')
+    if is_gust:
+        st.caption('DWD-ICON-D2-Windböen ohne experimentelle Temperaturkorrekturen.')
+    elif is_kind:
+        st.caption('Niederschlagsart aus stündlichen Regen-/Schneeanteilen; Graupel und unklare Fälle grau. Gefrierender Regen wird nicht diagnostiziert.')
+    else:
+        st.caption('ICON-D2-Niederschlag als Wasseräquivalent. Rate = stündliche Akkumulationsdifferenz.')
 start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +12 h)', options=list(range(13)), value=(0, 6), format_func=lambda h: f'+{h} h')
 st.caption(f'Es werden nur die Stunden +{start_hour} bis +{end_hour} (einschließlich) heruntergeladen und gezeichnet.')
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
@@ -467,7 +553,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             diagnostics = []
             for run in find_runs():
                 try:
-                    files, examples, matching = list_run(run, 'vmax_10m' if is_gust else 't_2m')
+                    files, examples, matching = list_run(run, 'tot_prec' if is_precip else ('vmax_10m' if is_gust else 't_2m'))
                     requested = list(range(start_hour, end_hour + 1))
                     available = [h for h in requested if h in files]
                     diagnostics.append(f'{run:%Y-%m-%d %H} UTC: {len(files)} Dateien; Stunden {available}; Beispiele: {matching or examples}')
@@ -481,16 +567,21 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     st.code('\n'.join(diagnostics))
                 raise RuntimeError(f'Kein ICON-D2-Lauf mit allen Stunden +{start_hour} bis +{end_hour} gefunden. Siehe DWD-Diagnose oben.')
             run, files, hours = selected
+            if is_precip:
+                # All preceding hours are needed for hourly precipitation differences.
+                hours = list(range(0, end_hour + 1)) if (is_kind or parameter_page == '🌧️ Rate') else list(range(start_hour,end_hour+1))
+                if any(h not in files for h in hours):
+                    raise RuntimeError('Für die Niederschlagsberechnung fehlen benötigte Stunden.')
             st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
             images = []
             terrain = None
             try:
-                if is_gust:
-                    raise ValueError('Für Böen nicht benötigt')
+                if is_gust or is_precip:
+                    raise ValueError('Für diesen Parameter nicht benötigt')
                 terrain = get_terrain()
                 st.write(f'Geländedaten geladen: {terrain.min():.0f} bis {terrain.max():.0f} m')
             except Exception as terrain_error:
-                if not is_gust:
+                if not is_gust and not is_precip:
                     st.warning(f'Geländedaten nicht verfügbar: {terrain_error}. Es werden nur ICON-D2-Karten erstellt.')
             landuse = None
             if enable_landuse and terrain is not None:
@@ -499,14 +590,64 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     st.write(f'WorldCover-Landnutzung geladen: {polygon_count} klassifizierte Rasterzellen; {(landuse > 0).mean():.0%} Rasterabdeckung')
                 except Exception as land_error:
                     st.warning(f'Gespeicherte Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
+            precip_previous = None
+            phase_previous = {}
+            phase_files = {}
+            if is_kind:
+                for component in ('rain_gsp','rain_con','snow_gsp','snow_con','grau_gsp'):
+                    available_files,_,_ = list_run(run,component)
+                    if any(h not in available_files for h in range(0,end_hour+1)):
+                        raise RuntimeError(f'Für Niederschlagsart fehlen Daten: {component} +0 bis +{end_hour} h.')
+                    phase_files[component] = available_files
             for idx, hour in enumerate(hours):
                 st.write(f'Lade und zeichne +{hour} h ({idx+1}/{len(hours)}) …')
-                messages = decode_grib(files[hour], 'vmax_10m' if is_gust else 't_2m')
-                # Hourly files can contain multiple 15-minute messages: choose exact valid time.
+                messages = decode_grib(files[hour], 'tot_prec' if is_precip else ('vmax_10m' if is_gust else 't_2m'))
+                # Select the exact hourly forecast time, never a neighboring quarter-hour.
                 target = run + timedelta(hours=hour)
                 msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
+                if abs((msg[3]-target).total_seconds()) > 60:
+                    raise RuntimeError(f'Kein exakter Prognosezeitpunkt für +{hour} h vorhanden.')
                 X, Y, Z = interpolate(*msg[:3])
-                original_png = (render_gust(X,Y,Z,run,msg[3]), render_gust(X,Y,Z,run,msg[3],show_km_values=True)) if is_gust else (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True))
+                if is_precip:
+                    if is_kind:
+                        increments = {}
+                        for component,component_files in phase_files.items():
+                            component_messages = decode_grib(component_files[hour],component)
+                            component_msg = min(component_messages,key=lambda m: abs((m[3]-target).total_seconds()))
+                            if abs((component_msg[3]-target).total_seconds()) > 60:
+                                raise RuntimeError(f'Zeitstempel stimmt nicht: {component} +{hour} h.')
+                            _,_,component_grid = interpolate(*component_msg[:3])
+                            if component in phase_previous:
+                                increments[component] = np.maximum(component_grid-phase_previous[component],0)
+                            else:
+                                increments[component] = np.zeros_like(component_grid)
+                            phase_previous[component] = component_grid
+                    # TOT_PREC is the accumulated water equivalent since model initialization.
+                    # Each hourly difference is a one-hour mean rate in mm/h.
+                    if not np.isfinite(Z).all():
+                        raise RuntimeError('Ungültige Niederschlagswerte im Modellfeld.')
+                    Z = np.maximum(Z,0)
+                    if precip_previous is None:
+                        hourly = np.zeros_like(Z)
+                    else:
+                        if np.nanmin(Z-precip_previous) < -.1:
+                            raise RuntimeError('Niederschlagsakkumulation fällt unerwartet ab; Daten prüfen.')
+                        hourly = np.maximum(Z-precip_previous,0)
+                    precip_previous = Z.copy()
+                    if hour < start_hour:
+                        continue
+                    display = hourly if parameter_page == '🌧️ Rate' else Z
+                    if is_kind:
+                        # Separate rain/snow components are needed; no temperature-only guessing.
+                        display = classify_precipitation(hourly,
+                            increments['rain_gsp']+increments['rain_con'],
+                            increments['snow_gsp']+increments['snow_con'],
+                            increments['grau_gsp'])
+                        original_png = (render_precip(X,Y,display,run,msg[3],parameter_page),)*2
+                    else:
+                        original_png = tuple(render_precip(X,Y,display,run,msg[3],parameter_page,flag) for flag in (False,True))
+                else:
+                    original_png = (render_gust(X,Y,Z,run,msg[3]), render_gust(X,Y,Z,run,msg[3],show_km_values=True)) if is_gust else (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True))
                 local_png = None
                 combined_png = None
                 diff_png = None
@@ -519,30 +660,30 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                         combined_png = tuple(render_png(X,Y,combined,run,msg[3],mode='Höhe + WorldCover-Landnutzung · experimentell',correction=combined-Z,show_km_values=flag) for flag in (False,True))
                         diff_png = render_difference(X, Y, combined-Z, run, msg[3])
                 images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
-            st.session_state['images_gust' if is_gust else 'images_temp'] = images
-            status.update(label='Temperaturkarten erstellt', state='complete')
+            st.session_state[{'🌡️ Temperatur':'images_temp','🌬️ Windböen':'images_gust','🌧️ Rate':'images_rate','💧 Summe':'images_sum','❄️ Art':'images_kind'}[parameter_page]] = images
+            status.update(label='Karten erstellt', state='complete')
         except Exception as exc:
             status.update(label='Abruf oder Verarbeitung fehlgeschlagen', state='error')
             st.error(f'{type(exc).__name__}: {exc}')
 
-image_key = 'images_gust' if is_gust else 'images_temp'
+image_key = {'🌡️ Temperatur':'images_temp','🌬️ Windböen':'images_gust','🌧️ Rate':'images_rate','💧 Summe':'images_sum','❄️ Art':'images_kind'}[parameter_page]
 if image_key in st.session_state:
     images = st.session_state[image_key]
     labels = [f'+{item[0]} h · {item[1].astimezone(TZ):%d.%m.%Y %H:%M %Z}' for item in images]
     choice = st.select_slider('Vorhersagekarte', options=range(len(images)),
-                              format_func=lambda i: labels[i], key='hour_gust' if is_gust else 'hour_temp')
+                              format_func=lambda i: labels[i], key='hour_'+image_key)
     st.caption(f'Ausgewählt: {labels[choice]}')
     h, valid, original_png, local_png, combined_png, diff_png = images[choice]
-    variants = {'ICON-D2 Windböen': original_png} if is_gust else {'ICON-D2 (interpoliert)': original_png}
-    if local_png is not None and not is_gust:
+    variants = {parameter_page: original_png} if is_precip else ({'ICON-D2 Windböen': original_png} if is_gust else {'ICON-D2 (interpoliert)': original_png})
+    if local_png is not None and not is_gust and not is_precip:
         variants['Höhenkorrektur'] = local_png
-    if combined_png is not None and not is_gust:
+    if combined_png is not None and not is_gust and not is_precip:
         variants['Höhe + Landnutzung'] = combined_png
         variants['Differenz zu ICON-D2'] = diff_png
-    variant = st.radio('Kartentyp', list(variants), horizontal=True, key='variant_gust' if is_gust else 'variant_temp')
-    show_km_values = st.checkbox('Werte alle ca. 1 km anzeigen', value=False, key='values_gust' if is_gust else 'values_temp', help='Interpolierte Modellwerte am jeweiligen Punkt, keine Messwerte.')
+    variant = st.radio('Kartentyp', list(variants), horizontal=True, key='variant_'+image_key)
+    show_km_values = st.checkbox('Werte alle ca. 1 km anzeigen', disabled=is_kind, value=False, key='values_'+image_key, help='Interpolierte Modellwerte am jeweiligen Punkt, keine Messwerte.')
     selected_map = variants[variant]
     png = selected_map if variant == 'Differenz zu ICON-D2' else selected_map[int(show_km_values)]
     st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
-                       file_name=f'ELBTAL_{"BOEEN" if is_gust else "T2M"}_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
+                       file_name=f'ELBTAL_{image_key}_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
