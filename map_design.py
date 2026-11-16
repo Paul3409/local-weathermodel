@@ -81,6 +81,22 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
     max_map_h = map_bottom - top
     if max_map_h <= 0:
         raise RuntimeError("Ungültiges 4:3-Kartenlayout.")
+    if portrait:
+        # Only the Germany detail map: remove empty navy margins already
+        # embedded in the Matplotlib PNG before fitting it into the frame.
+        # Preserve all colored map pixels, labels, ticks and colorbar.
+        from PIL import ImageChops
+        background = Image.new("RGB", raw.size, raw.getpixel((0, 0)))
+        difference = ImageChops.difference(raw, background).convert("L")
+        occupied = difference.point(lambda value: 255 if value > 18 else 0).getbbox()
+        if occupied:
+            pad = 18
+            raw = raw.crop((
+                max(0, occupied[0] - pad),
+                max(0, occupied[1] - pad),
+                min(raw.width, occupied[2] + pad),
+                min(raw.height, occupied[3] + pad),
+            ))
     raw.thumbnail((max_map_w,max_map_h),Image.Resampling.LANCZOS)
     canvas = Image.new("RGB", (width, height), NAVY)
     d = ImageDraw.Draw(canvas)
