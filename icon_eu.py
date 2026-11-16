@@ -6,6 +6,7 @@ import re
 import tempfile
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from significant_weather import classify_ww, palette, legend_handles
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
@@ -22,7 +23,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "forecast-120h-local-time-v1"
+MAP_STYLE_VERSION = "sigwx-ww-v1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -31,7 +32,7 @@ def previous_eu_lead(lead):
     if lead<=78:
         return lead-1
     return lead-3
-SURFACE_FIELDS = {"2-m-Temperatur":"t_2m","Windböen":"vmax_10m","Niederschlagsrate":"tot_prec","Niederschlagssumme":"tot_prec","Taupunkt":"td_2m","Niederschlagsart":"tot_prec"}
+SURFACE_FIELDS = {"2-m-Temperatur":"t_2m","Windböen":"vmax_10m","Niederschlagsrate":"tot_prec","Niederschlagssumme":"tot_prec","Taupunkt":"td_2m","Signifikantes Wetter":"ww"}
 PHASE_COMPONENTS=("rain_gsp","rain_con","snow_gsp","snow_con")
 PHASE_COLORS=["#F2F5F7","#278DCE","#F39A43","#F4A4CF","#8C949F"]
 PHASE_LABELS=["Trocken","Regen","Schneeregen","Schnee","Unklar"]
@@ -150,7 +151,9 @@ def load_grid(url, valid, bounds, variable):
                     x=np.linspace(west,east,nx)
                     y=np.linspace(south,north,ny)
                     X,Y=np.meshgrid(x,y)
-                    Z=griddata(np.column_stack((lon,lat)),vals,(X,Y),method="linear")
+                    Z=griddata(np.column_stack((lon,lat)),vals,(X,Y),method="nearest" if variable=="ww" else "linear")
+                    if variable=="ww" and not np.isfinite(Z).all():
+                        raise RuntimeError("Ungültige WW-Werte im Modellfeld.")
                     if not np.isfinite(Z).all():
                         nearest=griddata(np.column_stack((lon,lat)),vals,(X,Y),method="nearest")
                         Z=np.where(np.isfinite(Z),Z,nearest)
@@ -229,11 +232,10 @@ def render(X,Y,Z,region,parameter,run,valid):
         # Highlight the freezing-level isotherm without changing the temperature field.
         ax.contour(X,Y,Z,levels=[0],colors="#111827",linewidths=1.15)
         label="Temperatur auf 850 hPa (°C)"
-    elif parameter=="Niederschlagsart":
-        from matplotlib.colors import BoundaryNorm, ListedColormap
-        cmap=ListedColormap(PHASE_COLORS)
-        im=ax.contourf(X,Y,Z,levels=np.arange(-.5,5.5,1),cmap=cmap,norm=BoundaryNorm(np.arange(-.5,5.5,1),cmap.N))
-        label="Niederschlagsart (aus Modell-Akkumulationen abgeleitet)"
+    elif parameter=="Signifikantes Wetter":
+        cmap,norm,bounds_ww=palette()
+        im=ax.pcolormesh(X,Y,Z,cmap=cmap,norm=norm,shading="nearest",rasterized=True)
+        label="DWD ICON-EU WW (Wetterinterpretation)"
     else:
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         if parameter=="2-m-Temperatur":
@@ -282,10 +284,14 @@ def render(X,Y,Z,region,parameter,run,valid):
     ax.set_ylabel("Breitengrad (°N)")
     ax.grid(alpha=.15)
     ax.set_title(f"ELBTAL | ICON-EU {parameter} | {region}\nLauf {run:%d.%m.%Y %H:%M} UTC · Gültig {valid:%d.%m.%Y %H:%M} UTC",fontsize=11)
-    cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
-    if parameter=="Niederschlagsart":
-        cb.set_ticks(range(5))
-        cb.set_ticklabels(PHASE_LABELS)
+    if parameter=="Signifikantes Wetter":
+        fig.subplots_adjust(bottom=.27)
+        fig.legend(handles=legend_handles(),loc="lower center",ncol=4,fontsize=7,
+                   frameon=False,bbox_to_anchor=(.5,.015),columnspacing=.9,handlelength=1.6)
+    else:
+        cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
+    if parameter=="Signifikantes Wetter":
+        pass
     elif parameter=="T850":
         cb.set_ticks(np.arange(-30,31,5))
     elif parameter=="MSLP":
@@ -296,7 +302,8 @@ def render(X,Y,Z,region,parameter,run,valid):
         cb.set_ticks(np.arange(0,121,10))
     else:
         cb.set_ticks([0,10,20,30,50,75,100])
-    cb.set_label(label)
+    if parameter!="Signifikantes Wetter":
+        cb.set_label(label)
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
     plt.close(fig)
@@ -305,7 +312,7 @@ def render(X,Y,Z,region,parameter,run,valid):
 def show(region):
     st.subheader(f"ICON-EU · {region}")
     st.caption("ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden (abhängig vom verfügbaren Modelllauf). Landes- und Bundesländergrenzen bleiben erhalten.")
-    st.caption("Niederschlagsart: experimentelle Ableitung aus stündlichen Regen-/Schnee-Akkumulationen; keine Erkennung von gefrierendem Regen. Unklare Mischformen werden grau dargestellt.")
+    st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
     choices=["MSLP","T850"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter")
     now_preview=datetime.now(timezone.utc)
@@ -336,23 +343,13 @@ def show(region):
                     except requests.RequestException:
                         continue
                     previous_lead=previous_eu_lead(lead)
-                    required=[previous_lead,lead] if parameter in ("Niederschlagsrate","Niederschlagsart") and previous_lead is not None else [lead]
+                    required=[previous_lead,lead] if parameter=="Niederschlagsrate" and previous_lead is not None else [lead]
                     if all(hour in available for hour in required):
-                        components={}
-                        if parameter=="Niederschlagsart":
-                            try:
-                                for name in PHASE_COMPONENTS:
-                                    component_files=discover(run,name)
-                                    if not all(hour in component_files for hour in required):
-                                        raise ValueError(f"Fehlende {name}-Stunden")
-                                    components[name]=component_files
-                            except (requests.RequestException,ValueError):
-                                continue
-                        selected=(run,available[lead],available.get(previous_lead),components)
+                        selected=(run,available[lead],available.get(previous_lead))
                         break
                 if selected is None:
                     raise RuntimeError(f"Keine passende ICON-EU-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
-                run,url,previous_url,components=selected
+                run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
                 X,Y,Z=load_grid(url,valid,REGIONS[region],variable)
                 if parameter=="Niederschlagsrate":
@@ -367,37 +364,10 @@ def show(region):
                         Z=np.maximum(diff,0)
                 elif parameter=="Niederschlagssumme":
                     Z=np.maximum(Z,0)
-                elif parameter=="Niederschlagsart":
-                    if lead==0:
-                        Z=np.zeros_like(Z)
-                    else:
-                        _,_,previous_total=load_grid(previous_url,run+timedelta(hours=previous_lead),REGIONS[region],"tot_prec")
-                        total_delta=Z-previous_total
-                        if np.nanmin(total_delta)<-.1:
-                            raise RuntimeError("Niederschlagsakkumulation fällt ab; Art nicht bestimmbar.")
-                        increments={}
-                        for name,files in components.items():
-                            _,_,current=load_grid(files[lead],valid,REGIONS[region],name)
-                            _,_,previous=load_grid(files[previous_lead],run+timedelta(hours=previous_lead),REGIONS[region],name)
-                            delta=current-previous
-                            if np.nanmin(delta)<-.1:
-                                raise RuntimeError(f"Akkumulation {name} fällt ab; Art nicht bestimmbar.")
-                            increments[name]=np.maximum(delta,0)
-                        rain=increments["rain_gsp"]+increments["rain_con"]
-                        snow=increments["snow_gsp"]+increments["snow_con"]
-                        wet=total_delta>=.1
-                        classified=np.zeros_like(Z)
-                        known=rain+snow
-                        sufficient=known>=np.maximum(.07,.7*np.maximum(total_delta,0))
-                        classified[wet & ~sufficient]=4
-                        classified[wet & sufficient & (rain>=3*np.maximum(snow,.001))]=1
-                        classified[wet & sufficient & (snow>=3*np.maximum(rain,.001))]=3
-                        classified[wet & sufficient & (rain<3*np.maximum(snow,.001)) & (snow<3*np.maximum(rain,.001))]=2
-                        Z=classified
+                elif parameter=="Signifikantes Wetter":
+                    Z=classify_ww(Z)
                 if parameter=="Niederschlagsrate" and lead>78:
                     st.info(f"Niederschlagsrate: Mittelwert über die letzten {lead-previous_lead} Stunden (mm/h), nicht einstündiger Niederschlag.")
-                if parameter=="Niederschlagsart" and lead>78:
-                    st.info(f"Niederschlagsart: Ableitung aus den letzten {lead-previous_lead} Stunden, keine stündliche Diagnose.")
                 png=render(X,Y,Z,region,parameter,run,valid)
                 st.session_state["eu_map"]=(MAP_STYLE_VERSION,region,parameter,lead,valid,png)
                 st.caption(f"Verwendeter Modelllauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
