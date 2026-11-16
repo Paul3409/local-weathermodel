@@ -38,10 +38,11 @@ def runs(model):
     now=datetime.now(timezone.utc)
     hours=(0,6,12,18) if model=="GEFS" else (0,6,12,18)
     result=[]
-    for back in range(0,30,3):
+    # Operational products arrive with a delay: prefer a completed cycle.
+    for back in range(9,36,3):
         dt=(now-timedelta(hours=back)).replace(minute=0,second=0,microsecond=0)
         dt=dt.replace(hour=max(h for h in hours if h<=dt.hour))
-        if dt not in result and now-dt<=timedelta(hours=24):result.append(dt)
+        if dt not in result and now-dt<=timedelta(hours=30):result.append(dt)
     return result
 
 def read_point(data,lat,lon,expected):
@@ -94,7 +95,10 @@ def gefs_point(run,step,member,field,lat,lon):
             "toplat":round(lat+1.1,3),"bottomlat":round(lat-1.1,3)}
     response=requests.get("https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl",
                           params=params,headers=HEADERS,timeout=45)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        raise RuntimeError(f"NOAA HTTP {response.status_code}, Lauf {run:%d.%m. %H} UTC, +{step} h, Mitglied {member:02d}: {response.text[:110]}") from exc
     return read_point(response.content,lat,lon,field)
 
 @st.cache_data(ttl=3600,show_spinner=False)
@@ -226,9 +230,12 @@ def show():
                         raise RuntimeError("Niederschlagsdaten fehlen: "+"; ".join(precip_errors[:2]))
                 png=draw(model,place,run,field,steps,data,precipitation)
                 st.session_state["ens_chart"]=(model,place,parameter,run,horizon,png)
-                if errors:st.warning(f"{len(errors)} Teilabrufe fehlgeschlagen. Nur verfügbare Ensemblewerte dargestellt.")
+                if errors:
+                    st.warning(f"{len(errors)} Teilabrufe fehlgeschlagen. Nur verfügbare Ensemblewerte dargestellt.")
+                    with st.expander("Technische Abruffehler anzeigen"):
+                        for message in list(dict.fromkeys(errors))[:8]:st.code(message)
             except Exception as exc:st.error(f"Ensemble-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}")
     chart=st.session_state.get("ens_chart")
     if chart and chart[:5]==(model,place,parameter,run,horizon):
-        st.image(chart[5],use_container_width=True)
+        st.image(chart[5],width="stretch")
         st.download_button("PNG herunterladen",chart[5],file_name=f"ELBTAL_Ensemble_{model.replace(' ','_')}_{run:%Y%m%d%H}.png",mime="image/png")
