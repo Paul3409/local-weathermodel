@@ -111,7 +111,7 @@ def decode_grib(url, parameter='t_2m'):
                     lats = np.asarray(codes_get_array(gid, 'latitudes'), dtype=float)
                     lons = np.asarray(codes_get_array(gid, 'longitudes'), dtype=float)
                     vals = np.asarray(codes_get_array(gid, 'values'), dtype=float)
-                    vals = vals - 273.15 if parameter in ('t_2m','td_2m') else (vals * 3.6 if parameter in ('vmax_10m','ff_10m') else vals)
+                    vals = vals - 273.15 if parameter in ('t_2m','td_2m') else (vals * 3.6 if parameter in ('vmax_10m',) else vals)
                     valid_date = int(codes_get(gid, 'validityDate'))
                     valid_time = int(codes_get(gid, 'validityTime'))
                     valid = datetime.strptime(f'{valid_date:08d}{valid_time:04d}', '%Y%m%d%H%M').replace(tzinfo=timezone.utc)
@@ -619,7 +619,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     raise RuntimeError('Benötigte Niederschlagsdateien fehlen.')
             if is_fog:
                 fog_files = {}
-                for p in ('t_2m','ff_10m'):
+                for p in ('t_2m','u_10m','v_10m'):
                     found,_,_ = list_run(run,p)
                     if any(h not in found for h in hours):
                         raise RuntimeError(f'Für Nebel fehlen ICON-D2-Dateien: {p}.')
@@ -706,7 +706,9 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                             raise RuntimeError(f'Zeitstempel für {parameter} +{hour} h fehlt.')
                         return interpolate(*record[:3])[2]
                     t2m=load_fog_field('t_2m')
-                    wind=load_fog_field('ff_10m')
+                    u10=load_fog_field('u_10m')
+                    v10=load_fog_field('v_10m')
+                    wind=np.hypot(u10,v10)*3.6
                     spread=np.maximum(t2m-Z,0)
                     # Diagnostic indicator, not a probability or actual fog visibility.
                     score=np.clip((2.5-spread)/2.5,0,1)*np.clip((18-wind)/15,0,1)
