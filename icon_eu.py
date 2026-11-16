@@ -55,8 +55,6 @@ def discover(run, variable):
         if variable in SURFACE_FIELDS.values() or variable in PHASE_COMPONENTS:
             if variable not in lower:
                 continue
-        if False:
-            continue
         if variable=="pmsl" and "single-level" not in lower:
             continue
         if variable=="t" and ("pressure-level" not in lower or not re.search(r"(?:^|_)850(?:_|\.)",lower)):
@@ -222,6 +220,11 @@ def render(X,Y,Z,region,parameter,run,valid):
         # Highlight the freezing-level isotherm without changing the temperature field.
         ax.contour(X,Y,Z,levels=[0],colors="#111827",linewidths=1.15)
         label="Temperatur auf 850 hPa (°C)"
+    elif parameter=="Niederschlagsart":
+        from matplotlib.colors import BoundaryNorm, ListedColormap
+        cmap=ListedColormap(PHASE_COLORS)
+        im=ax.contourf(X,Y,Z,levels=np.arange(-.5,5.5,1),cmap=cmap,norm=BoundaryNorm(np.arange(-.5,5.5,1),cmap.N))
+        label="Niederschlagsart (aus Modell-Akkumulationen abgeleitet)"
     else:
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         if parameter=="2-m-Temperatur":
@@ -271,7 +274,10 @@ def render(X,Y,Z,region,parameter,run,valid):
     ax.grid(alpha=.15)
     ax.set_title(f"ELBTAL | ICON-EU {parameter} | {region}\nLauf {run:%d.%m.%Y %H:%M} UTC · Gültig {valid:%d.%m.%Y %H:%M} UTC",fontsize=11)
     cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
-    if parameter=="T850":
+    if parameter=="Niederschlagsart":
+        cb.set_ticks(range(5))
+        cb.set_ticklabels(PHASE_LABELS)
+    elif parameter=="T850":
         cb.set_ticks(np.arange(-30,31,5))
     elif parameter=="MSLP":
         cb.set_ticks([950,970,985,995,1005,1015,1030,1045,1060])
@@ -290,6 +296,7 @@ def render(X,Y,Z,region,parameter,run,valid):
 def show(region):
     st.subheader(f"ICON-EU · {region}")
     st.caption("Stündliche Original-Modellzeitpunkte; Landesgrenzen und bei Deutschland Bundesländergrenzen. Keine künstliche zeitliche Verfeinerung.")
+    st.caption("Niederschlagsart: experimentelle Ableitung aus stündlichen Regen-/Schnee-Akkumulationen; keine Erkennung von gefrierendem Regen. Unklare Mischformen werden grau dargestellt.")
     choices=["MSLP","T850"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter")
     lead=st.select_slider("Vorhersagestunde",options=list(range(25)),value=6,format_func=lambda h:f"+{h} h",key="eu_lead")
@@ -312,11 +319,21 @@ def show(region):
                         continue
                     required=[lead-1,lead] if parameter=="Niederschlagsrate" and lead>0 else [lead]
                     if all(hour in available for hour in required):
-                        selected=(run,available[lead],available.get(lead-1))
+                        components={}
+                        if parameter=="Niederschlagsart":
+                            try:
+                                for name in PHASE_COMPONENTS:
+                                    component_files=discover(run,name)
+                                    if not all(hour in component_files for hour in required):
+                                        raise ValueError(f"Fehlende {name}-Stunden")
+                                    components[name]=component_files
+                            except (requests.RequestException,ValueError):
+                                continue
+                        selected=(run,available[lead],available.get(lead-1),components)
                         break
                 if selected is None:
                     raise RuntimeError(f"Keine passende ICON-EU-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
-                run,url,previous_url=selected
+                run,url,previous_url,components=selected
                 valid=run+timedelta(hours=lead)
                 X,Y,Z=load_grid(url,valid,REGIONS[region],variable)
                 if parameter=="Niederschlagsrate":
@@ -330,6 +347,33 @@ def show(region):
                         Z=np.maximum(diff,0)
                 elif parameter=="Niederschlagssumme":
                     Z=np.maximum(Z,0)
+                elif parameter=="Niederschlagsart":
+                    if lead==0:
+                        Z=np.zeros_like(Z)
+                    else:
+                        _,_,previous_total=load_grid(previous_url,valid-timedelta(hours=1),REGIONS[region],"tot_prec")
+                        total_delta=Z-previous_total
+                        if np.nanmin(total_delta)<-.1:
+                            raise RuntimeError("Niederschlagsakkumulation fällt ab; Art nicht bestimmbar.")
+                        increments={}
+                        for name,files in components.items():
+                            _,_,current=load_grid(files[lead],valid,REGIONS[region],name)
+                            _,_,previous=load_grid(files[lead-1],valid-timedelta(hours=1),REGIONS[region],name)
+                            delta=current-previous
+                            if np.nanmin(delta)<-.1:
+                                raise RuntimeError(f"Akkumulation {name} fällt ab; Art nicht bestimmbar.")
+                            increments[name]=np.maximum(delta,0)
+                        rain=increments["rain_gsp"]+increments["rain_con"]
+                        snow=increments["snow_gsp"]+increments["snow_con"]
+                        wet=total_delta>=.1
+                        classified=np.zeros_like(Z)
+                        known=rain+snow
+                        sufficient=known>=np.maximum(.07,.7*np.maximum(total_delta,0))
+                        classified[wet & ~sufficient]=4
+                        classified[wet & sufficient & (rain>=3*np.maximum(snow,.001))]=1
+                        classified[wet & sufficient & (snow>=3*np.maximum(rain,.001))]=3
+                        classified[wet & sufficient & (rain<3*np.maximum(snow,.001)) & (snow<3*np.maximum(rain,.001))]=2
+                        Z=classified
                 png=render(X,Y,Z,region,parameter,run,valid)
                 st.session_state["eu_map"]=(MAP_STYLE_VERSION,region,parameter,lead,valid,png)
                 status.update(label="ICON-EU-Karte erstellt",state="complete")
