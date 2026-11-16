@@ -157,7 +157,8 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
     src=source or ("DWD" if model.startswith("ICON") else "NOAA")
     source_label = "DWD RADOLAN" if model == "DWD RADOLAN" else f"{src} ({model})"
     text(35,fy+16,f"Daten: {source_label}    |    Region: {region}",14,MUTED)
-    brand="ELBTAL v1.0"
+    from app_version import VERSION
+    brand=f"ELBTAL V{VERSION}"
     bb=d.textbbox((0,0),brand,font=_font(u(20),True))
     d.text((width-u(37)-(bb[2]-bb[0]),u(fy+12)),brand,font=_font(u(20),True),fill=WHITE)
     output=io.BytesIO()
