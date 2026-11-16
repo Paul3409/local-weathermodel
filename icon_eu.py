@@ -294,6 +294,7 @@ GFS_FIELDS={
     "MSLP":("PRMSL","mean_sea_level"),
     "Z500 + MSLP":("HGT","500_mb"),
     "T850":("TMP","850_mb"),
+    "T850 + MSLP":("TMP","850_mb"),
     "2-m-Temperatur":("TMP","2_m_above_ground"),
     "Taupunkt":("DPT","2_m_above_ground"),
     "Windböen":("GUST","surface"),
@@ -356,14 +357,14 @@ def load_gfs(url,valid,bounds,parameter):
                     if not mask.any():continue
                     lat,lon,vals=lat[mask],lon[mask],vals[mask]
                     if parameter=="MSLP":vals=vals/100.
-                    elif parameter in ("T850","2-m-Temperatur","Taupunkt","Windchill"):vals=vals-273.15
+                    elif parameter in ("T850","T850 + MSLP","2-m-Temperatur","Taupunkt","Windchill"):vals=vals-273.15
                     elif parameter=="Z500 + MSLP":vals=vals/10
                     elif parameter=="Windböen":vals=vals*3.6
                     elif parameter in ("Schneehöhe","Neuschneemenge"):vals=vals*100.0
                     if not np.isfinite(vals).all():raise RuntimeError("GFS-Feld enthält fehlende Werte.")
                     if parameter=="Z500 + MSLP" and not 400<np.median(vals)<650:raise RuntimeError("GFS-Z500 unplausibel.")
                     if parameter=="MSLP" and not 850<np.median(vals)<1100:raise RuntimeError("GFS-MSLP unplausibel.")
-                    if parameter in ("T850","2-m-Temperatur","Taupunkt") and not -100<np.median(vals)<60:raise RuntimeError("GFS-Temperatur unplausibel.")
+                    if parameter in ("T850","T850 + MSLP","2-m-Temperatur","Taupunkt") and not -100<np.median(vals)<60:raise RuntimeError("GFS-Temperatur unplausibel.")
                     if parameter=="Windböen" and not 0<=np.median(vals)<250:raise RuntimeError("GFS-Windböen unplausibel.")
                     nx,ny=(225,180) if bounds==REGIONS["Deutschland"] else (300,220)
                     X,Y=np.meshgrid(np.linspace(west,east,nx),np.linspace(south,north,ny))
@@ -419,6 +420,14 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         water=snow_water_mask(X,Y)
         ax.pcolormesh(X,Y,np.ma.masked_where(~water,np.ones(Z.shape)),cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
         label="Schneehöhe (cm)" if parameter=="Schneehöhe" else "Berechnete Neuschneehöhe seit Modellstart (cm; 10:1-Schätzung bei ICON)"
+    elif parameter=="T850 + MSLP":
+        if mslp is None or mslp.shape!=Z.shape or not 850<float(np.nanmedian(mslp))<1100:
+            raise RuntimeError("MSLP-Raster für weiße Isobaren fehlt oder ist ungültig.")
+        levels=np.arange(-40,41,2)
+        im=ax.contourf(X,Y,Z,levels=levels,cmap="coolwarm",extend="both")
+        lines=ax.contour(X,Y,mslp,levels=np.arange(940,1081,4),colors="white",linewidths=1.05,alpha=.98)
+        ax.clabel(lines,inline=True,fontsize=7,fmt="%d",colors="white")
+        label="850-hPa-Luftmassentemperatur (°C) · weiße MSLP-Isobaren (hPa)"
     elif parameter=="Z500 + MSLP":
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         if mslp is None or mslp.shape!=Z.shape: raise RuntimeError("MSLP-Raster fehlt.")
@@ -466,7 +475,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         line=ax.contour(X,Y,Z,levels=contours,colors="#24364b",linewidths=.55)
         ax.clabel(line,inline=True,fontsize=6,fmt="%d")
         label="Luftdruck auf Meereshöhe (hPa)"
-    elif parameter=="T850":
+    elif parameter in ("T850","T850 + MSLP"):
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         # Fixed meteorological T850 palette, with a narrow transition at 0 °C.
         # Slightly negative values remain light blue; positive values start dark green.
@@ -588,7 +597,7 @@ def show(region):
     model=st.segmented_control("Wettermodell",["ICON-EU","ICON-D2","GFS"] if region=="Deutschland" else ["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
     st.caption("ICON-D2: Deutschland bis +48 h stündlich (sofern die DWD-Dateien verfügbar sind). ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
-    choices=(["MSLP","T850","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","Z500 + MSLP"])
+    choices=(["MSLP","T850","T850 + MSLP","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","T850 + MSLP","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","T850 + MSLP","Z500 + MSLP"])
     choices += ["Neuschneemenge","Schneehöhe"]
     if "Windchill" not in choices: choices.append("Windchill")
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
@@ -631,7 +640,7 @@ def show(region):
                         run=run.replace(hour=(run.hour//3)*3)
                         if run not in runs and (model=="GFS" or model=="ICON-D2" or lead<=78 or run.hour in (0,6,12,18)) and (model!="GFS" or run.hour in (0,6,12,18)):
                             runs.append(run)
-                variable="snow_gsp" if parameter=="Neuschneemenge" else ("pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else ("fi" if parameter=="Z500 + MSLP" else SURFACE_FIELDS.get(parameter,"t_2m"))))
+                variable="snow_gsp" if parameter=="Neuschneemenge" else ("pmsl" if parameter=="MSLP" else ("t" if parameter in ("T850","T850 + MSLP") else ("fi" if parameter=="Z500 + MSLP" else SURFACE_FIELDS.get(parameter,"t_2m"))))
                 selected=None
                 for run in runs:
                     try:
@@ -652,7 +661,7 @@ def show(region):
                             try: extra=discover_d2(run,"snow_con") if model=="ICON-D2" else discover(run,"snow_con")
                             except requests.RequestException: continue
                             if lead not in extra: continue
-                        if parameter=="Z500 + MSLP" and model!="GFS":
+                        if parameter in ("Z500 + MSLP","T850 + MSLP") and model!="GFS":
                             try: pressure_files=discover_d2(run,"pmsl") if model=="ICON-D2" else discover(run,"pmsl")
                             except requests.RequestException: continue
                             if lead not in pressure_files: continue
@@ -707,7 +716,7 @@ def show(region):
                 if parameter=="Niederschlagsrate" and lead>78:
                     st.info(f"Niederschlagsrate: Mittelwert über die letzten {lead-previous_lead} Stunden (mm/h), nicht einstündiger Niederschlag.")
                 mslp=None
-                if parameter=="Z500 + MSLP":
+                if parameter in ("Z500 + MSLP","T850 + MSLP"):
                     if model!="GFS":
                         pressure_files=discover_d2(run,"pmsl") if model=="ICON-D2" else discover(run,"pmsl")
                         _,_,mslp=load_grid(pressure_files[lead],valid,REGIONS[region],"pmsl")
