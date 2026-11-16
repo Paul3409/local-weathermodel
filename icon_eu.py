@@ -99,6 +99,59 @@ def discover_d2(run,variable):
             result[int(match.group(1))]=urljoin(folder,name)
     return result
 
+@st.cache_data(ttl=3600,show_spinner=False)
+def d2_native_coordinates(run):
+    """Fetch time-invariant ICON-D2 cell-center coordinates in GRIB value order."""
+    coords=[]
+    for field in ("clat","clon"):
+        folder=f"{D2_BASE}/{run:%H}/{field}/"
+        response=requests.get(folder,headers=HEADERS,timeout=30)
+        response.raise_for_status()
+        parser=Links()
+        parser.feed(response.text)
+        stamp=run.strftime("%Y%m%d%H")
+        names=[name for name in parser.names
+               if name.lower().endswith(".grib2.bz2")
+               and stamp in name and "icosahedral" in name.lower()]
+        if not names:
+            raise RuntimeError(f"ICON-D2-Gitterkoordinate {field.upper()} für Lauf {stamp} fehlt.")
+        name=next((name for name in names if "time-invariant" in name.lower()),names[0])
+        raw=requests.get(urljoin(folder,name),headers=HEADERS,timeout=90)
+        raw.raise_for_status()
+        with tempfile.NamedTemporaryFile(suffix=".grib2",delete=False) as tmp:
+            tmp.write(bz2.decompress(raw.content))
+            filename=tmp.name
+        try:
+            with open(filename,"rb") as stream:
+                gid=codes_grib_new_from_file(stream)
+                if gid is None:
+                    raise RuntimeError(f"Leere ICON-D2-{field.upper()}-Datei.")
+                try:
+                    values=np.asarray(codes_get_array(gid,"values"),dtype=np.float64)
+                    try:
+                        unit=str(codes_get(gid,"units")).lower()
+                    except Exception:
+                        unit=""
+                    if "rad" in unit:
+                        values=np.rad2deg(values)
+                    elif not ("deg" in unit or "degree" in unit):
+                        if field=="clat" and np.nanmax(np.abs(values))<=1.7:
+                            values=np.rad2deg(values)
+                        elif field=="clon" and np.nanmax(np.abs(values))<=6.4:
+                            values=np.rad2deg(values)
+                    coords.append(values)
+                finally:
+                    codes_release(gid)
+        finally:
+            os.unlink(filename)
+    lat,lon=coords
+    if len(lat)!=len(lon) or not np.isfinite(lat).all() or not np.isfinite(lon).all():
+        raise RuntimeError("ICON-D2 CLAT/CLON haben ungleiche Länge oder ungültige Werte.")
+    if not (np.nanmin(lat)>=-90 and np.nanmax(lat)<=90):
+        raise RuntimeError("ICON-D2 CLAT liegt außerhalb gültiger Breitengrade.")
+    return lat,lon
+
+
 @st.cache_data(ttl=86400,show_spinner=False)
 def borders(url):
     response=requests.get(url,headers=HEADERS,timeout=30)
@@ -163,15 +216,28 @@ def load_grid(url, valid, bounds, variable):
                         level=int(codes_get(gid,"level"))
                         if level!=(850 if variable=="t" else 500):
                             continue
+                    vals=np.asarray(codes_get_array(gid,"values"))
                     try:
                         lat=np.asarray(codes_get_array(gid,"latitudes"))
                         lon=np.asarray(codes_get_array(gid,"longitudes"))
-                        vals=np.asarray(codes_get_array(gid,"values"))
                     except Exception as grid_error:
+                        if "/icon-d2/" not in url:
+                            raise RuntimeError(
+                                f"GRIB-Koordinaten für {variable} nicht lesbar: {grid_error}"
+                            ) from grid_error
+                        # Native ICON-D2 GRIB (unstructured grid) has no embedded lat/lon.
+                        # The DWD CLAT/CLON time-invariant fields share the value order.
+                        stamp_match=re.search(r"_(\\d{10})_\\d{3}(?:_|\\.)",url)
+                        if not stamp_match:
+                            raise RuntimeError("ICON-D2-Modelllauf im Dateinamen nicht erkennbar.")
+                        model_run=datetime.strptime(stamp_match.group(1),"%Y%m%d%H").replace(tzinfo=timezone.utc)
+                        lat,lon=d2_native_coordinates(model_run)
+                    if len(vals)!=len(lat) or len(vals)!=len(lon):
                         raise RuntimeError(
-                            f"GRIB-Gitterdaten für {variable} nicht lesbar "
-                            f"(latitudes/longitudes/values): {grid_error}"
-                        ) from grid_error
+                            f"ICON-D2-Gitter nicht kompatibel: {len(vals)} Werte, "
+                            f"{len(lat)} CLAT und {len(lon)} CLON. "
+                            "Kein räumlich falsches Kartenbild erzeugt."
+                        )
                     lon=np.where(lon>180,lon-360,lon)
                     west,east,south,north=bounds
                     mask=(lon>=west-.5)&(lon<=east+.5)&(lat>=south-.5)&(lat<=north+.5)
