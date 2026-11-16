@@ -136,8 +136,8 @@ def interpolate(lats, lons, vals, grid_m=None, categorical=False):
     keep = (lats >= LAT_MIN-.09) & (lats <= LAT_MAX+.09) & (lons >= LON_MIN-.09) & (lons <= LON_MAX+.09)
     if keep.sum() < 6:
         raise ValueError('Zu wenige ICON-D2-Rasterpunkte im Modellgebiet.')
-    nlat = round((LAT_MAX-LAT_MIN)*111200/grid_m)+1 if grid_m else 245
-    nlon = round((LON_MAX-LON_MIN)*111200*math.cos(math.radians((LAT_MIN+LAT_MAX)/2))/grid_m)+1 if grid_m else 235
+    nlat = round((LAT_MAX-LAT_MIN)*111200/grid_m)+1 if grid_m else (125 if LAT_MAX-LAT_MIN > 1 else 245)
+    nlon = round((LON_MAX-LON_MIN)*111200*math.cos(math.radians((LAT_MIN+LAT_MAX)/2))/grid_m)+1 if grid_m else (160 if LON_MAX-LON_MIN > 1 else 235)
     lat_axis = np.linspace(LAT_MIN, LAT_MAX, nlat)
     lon_axis = np.linspace(LON_MIN, LON_MAX, nlon)
     X, Y = np.meshgrid(lon_axis, lat_axis)
@@ -157,8 +157,8 @@ def get_terrain(bounds=None):
     an error rather than silently generating synthetic elevation.
     """
     z = 9 if bounds is not None else 11
-    lat_axis = np.linspace(LAT_MIN, LAT_MAX, 245)
-    lon_axis = np.linspace(LON_MIN, LON_MAX, 235)
+    lat_axis = np.linspace(LAT_MIN, LAT_MAX, 125 if bounds is not None else 245)
+    lon_axis = np.linspace(LON_MIN, LON_MAX, 160 if bounds is not None else 235)
     X, Y = np.meshgrid(lon_axis, lat_axis)
     scale = 2 ** z
     xpix = (X + 180.0) / 360.0 * scale * 256
@@ -781,13 +781,13 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 elif is_dew:
                     original_png=tuple(render_png(X,Y,Z,run,msg[3],mode='ICON-D2 Taupunkt · keine lokale Korrektur',show_km_values=flag) for flag in (False,True))
                 else:
-                    original_png = (render_gust(X,Y,Z,run,msg[3]), render_gust(X,Y,Z,run,msg[3],show_km_values=True)) if is_gust else (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True))
+                    original_png = (render_gust(X,Y,Z,run,msg[3]), render_gust(X,Y,Z,run,msg[3],show_km_values=True)) if is_gust else ((None,None) if krumet_mode else (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True)))
                 local_png = None
                 combined_png = None
                 diff_png = None
                 if terrain is not None:
                     local, correction = downscale_temperature(Z, terrain)
-                    local_png = tuple(render_png(X,Y,local,run,msg[3],mode='KRUMET · Höhenkorrektur' if krumet_mode else 'Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag,model_name='KRUMET' if krumet_mode else 'ICON-D2') for flag in (False,True))
+                    local_png = (render_png(X,Y,local,run,msg[3],mode='KRUMET · Höhenkorrektur',correction=correction,model_name='KRUMET'),)*2 if krumet_mode else tuple(render_png(X,Y,local,run,msg[3],mode='Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag) for flag in (False,True))
                     if landuse is not None:
                         lu_corr = landuse_temperature_correction(landuse, msg[3])
                         combined = local + lu_corr
@@ -808,14 +808,14 @@ if image_key in st.session_state:
                               format_func=lambda i: labels[i], key='hour_'+image_key)
     st.caption(f'Ausgewählt: {labels[choice]}')
     h, valid, original_png, local_png, combined_png, diff_png = images[choice]
-    variants = {parameter_page: original_png} if (is_precip or is_kind or is_dew or is_fog) else ({'ICON-D2 Windböen': original_png} if is_gust else {'ICON-D2 (Referenz)': original_png} if krumet_mode else {'ICON-D2 (interpoliert)': original_png})
+    variants = {parameter_page: original_png} if (is_precip or is_kind or is_dew or is_fog) else ({'ICON-D2 Windböen': original_png} if is_gust else {} if krumet_mode else {'ICON-D2 (interpoliert)': original_png})
     if local_png is not None and parameter_page == '🌡️ Temperatur':
         variants['KRUMET · Höhenkorrektur' if krumet_mode else 'Höhenkorrektur'] = local_png
     if combined_png is not None and parameter_page == '🌡️ Temperatur':
         variants['KRUMET · Höhe + Landnutzung' if krumet_mode else 'Höhe + Landnutzung'] = combined_png
         variants['Differenz zu ICON-D2'] = diff_png
     variant = st.radio('Kartentyp', list(variants), horizontal=True, key='variant_'+image_key)
-    show_km_values = st.checkbox('Werte alle ca. 1 km anzeigen', disabled=is_kind or is_fog, value=False, key='values_'+image_key, help='Interpolierte Modellwerte am jeweiligen Punkt, keine Messwerte.')
+    show_km_values = False if krumet_mode else st.checkbox('Werte alle ca. 1 km anzeigen', disabled=is_kind or is_fog, value=False, key='values_'+image_key, help='Interpolierte Modellwerte am jeweiligen Punkt, keine Messwerte.')
     selected_map = variants[variant]
     png = selected_map if variant == 'Differenz zu ICON-D2' else selected_map[int(show_km_values)]
     st.image(png, width='stretch')
