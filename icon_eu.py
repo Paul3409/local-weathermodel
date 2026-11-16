@@ -516,6 +516,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         if parameter=="2-m-Temperatur":
             stops,vmin,vmax=TEMP_STOPS,-20,20
+            label="Lufttemperatur in 2 m (°C)"
         elif parameter=="Windchill":
             stops,vmin,vmax=TEMP_STOPS,-20,20
             label="Windchill (°C; T2m + Wind 10 m)"
@@ -574,7 +575,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         cb.set_ticks([.1,1,5,10,20,30,50,75,100,150])
     elif parameter=="Z500 + MSLP":
         cb.set_ticks(np.arange(480,601,10))
-    elif parameter=="T850":
+    elif parameter in ("T850","T850 + MSLP"):
         cb.set_ticks(np.arange(-30,31,5))
     elif parameter=="MSLP":
         cb.set_ticks([950,970,985,995,1005,1015,1030,1045,1060])
