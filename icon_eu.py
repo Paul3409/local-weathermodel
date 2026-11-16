@@ -1,3 +1,4 @@
+from map_design import style_figure, frame_png
 """ICON-EU synoptic maps. Data and boundaries are downloaded only on manual request."""
 import bz2
 import io
@@ -385,10 +386,11 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU"):
         cb.set_ticks([0,10,20,30,50,75,100])
     if parameter!="Signifikantes Wetter":
         cb.set_label(label)
+    style_figure(fig, ax)
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
     plt.close(fig)
-    return output.getvalue()
+    return frame_png(output.getvalue(), parameter, model, region, run, valid)
 
 def show(region):
     st.subheader(f"Wettermodelle · {region}")
