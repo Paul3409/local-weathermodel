@@ -150,13 +150,13 @@ def interpolate(lats, lons, vals, grid_m=None, categorical=False):
 
 
 @st.cache_data(ttl=86400, show_spinner=False)
-def get_terrain():
+def get_terrain(bounds=None):
     """Load public Terrarium elevation PNG tiles and resample to our 100-m-ish grid.
 
     Tiles are elevation datasets, not weather observations. If unavailable, raise
     an error rather than silently generating synthetic elevation.
     """
-    z = 11
+    z = 9 if bounds is not None else 11
     lat_axis = np.linspace(LAT_MIN, LAT_MAX, 245)
     lon_axis = np.linspace(LON_MIN, LON_MAX, 235)
     X, Y = np.meshgrid(lon_axis, lat_axis)
@@ -359,7 +359,7 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), ('Taupunkt' if 'Taupunkt' in mode else 'Temperatur'), model_name, 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), ('Taupunkt' if 'Taupunkt' in mode else 'Temperatur'), model_name, 'Sachsen + Umgebung' if model_name=='KRUMET' else 'Elbtal', run, valid)
 
 
 def render_difference(X, Y, difference, run, valid, model_name='ICON-D2'):
@@ -388,7 +388,7 @@ def render_difference(X, Y, difference, run, valid, model_name='ICON-D2'):
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), 'Temperaturdifferenz', model_name, 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), 'Temperaturdifferenz', model_name, 'Sachsen + Umgebung' if model_name=='KRUMET' else 'Elbtal', run, valid)
 
 
 GUST_STOPS = [(0,'#499FE1'),(10,'#204D99'),(20,'#347B4A'),(30,'#A3BE4B'),(40,'#E8D24A'),(50,'#F3A143'),(60,'#E96A38'),(70,'#DB3834'),(80,'#B9252E'),(90,'#811A2C'),(100,'#48205F'),(110,'#853AA8'),(120,'#C52D9A')]
@@ -568,8 +568,11 @@ if map_region in ('Deutschland','Europa'):
     st.stop()
 krumet_mode = map_region == 'KRUMET'
 if krumet_mode:
-    st.subheader('🔬 KRUMET v0.1 | Lokale Temperaturverfeinerung')
-    st.caption('Experimentelles ICON-D2-Downscaling mit Gelände und optional ESA WorldCover. Heuristisch, nicht durch Messungen validiert.')
+    LAT_MIN, LAT_MAX = 50.0, 52.2
+    LON_MIN, LON_MAX = 11.5, 15.4
+    PLACES = {'Leipzig': (51.340, 12.375), 'Dresden': (51.051, 13.738), 'Chemnitz': (50.833, 12.925), 'Zwickau': (50.718, 12.493), 'Görlitz': (51.156, 14.989), 'Bautzen': (51.181, 14.429), 'Belgern': (51.483, 13.125), 'Mühlberg': (51.434, 13.222), 'Cottbus': (51.760, 14.335), 'Altenburg': (50.985, 12.434)}
+    st.subheader('🔬 KRUMET v0.2 | Sachsen und Umgebung')
+    st.caption('Gebiet: 50,0–52,2°N / 11,5–15,4°O. Experimentelle ICON-D2-Geländekorrektur; WorldCover für das größere Gebiet noch nicht verfügbar.')
 else:
     st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
 parameter_page = '🌡️ Temperatur' if krumet_mode else st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','🌦️ Signifikantes Wetter','💦 Taupunkt','🌫️ Nebel'], default='🌡️ Temperatur', selection_mode='single')
@@ -584,7 +587,7 @@ if not is_gust and not is_precip and not is_kind and not is_dew and not is_fog:
 if parameter_page == '🌡️ Temperatur':
   with st.expander('Landnutzung einmalig vorbereiten', expanded=False):
       st.write('Einmalige ESA-WorldCover-Abfrage; anschließend die erzeugte NPZ-Datei unter `data/landuse.npz` in GitHub hochladen. Bei regulären Prognosen wird kein Landnutzungsserver aufgerufen.')
-      if st.button('ESA-WorldCover-Raster einmalig abrufen'):
+      if st.button('ESA-WorldCover-Raster einmalig abrufen', disabled=krumet_mode):
           try:
               with st.spinner('Lade ESA-WorldCover-Ausschnitt …'):
                   raster, polygon_count = get_landuse()
@@ -595,7 +598,7 @@ if parameter_page == '🌡️ Temperatur':
       if 'prepared_landuse' in st.session_state:
           st.download_button('landuse.npz herunterladen', data=st.session_state['prepared_landuse'],
                              file_name='landuse.npz', mime='application/octet-stream')
-  if LANDUSE_FILE.exists():
+  if LANDUSE_FILE.exists() and not krumet_mode:
       st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
   else:
       st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
@@ -682,7 +685,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             try:
                 if is_gust or is_precip or is_kind or is_dew or is_fog:
                     raise ValueError('Für diesen Parameter nicht benötigt')
-                terrain = get_terrain()
+                terrain = get_terrain((LAT_MIN,LAT_MAX,LON_MIN,LON_MAX) if krumet_mode else None)
                 st.write(f'Geländedaten geladen: {terrain.min():.0f} bis {terrain.max():.0f} m')
             except Exception as terrain_error:
                 if krumet_mode:
