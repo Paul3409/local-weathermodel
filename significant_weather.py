@@ -5,10 +5,10 @@ from matplotlib.patches import Patch
 
 # Order: cloud cover, fog, precipitation, thunderstorm; reference colors chosen by ELBTAL.
 CATEGORIES = [
-    ("Wolkenlos", "#F5F7FA"),
-    ("Heiter", "#E6EAEE"),
-    ("Wolkig", "#CCD4DB"),
-    ("Bedeckt", "#AEB9C3"),
+    ("Wolkenlos", "#F1F5F9"),
+    ("Heiter", "#CBD5DF"),
+    ("Wolkig", "#93A4B5"),
+    ("Bedeckt", "#536579"),
     ("Nebel", "#FFFF31"),
     ("Regen leicht", "#37FA35"),
     ("Regen mäßig", "#29C72A"),
