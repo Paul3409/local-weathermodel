@@ -24,7 +24,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "time-label-gfs-v1"
+MAP_STYLE_VERSION = "z500-mslp-v1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -68,7 +68,7 @@ def discover(run, variable):
                 continue
         if variable=="pmsl" and "single-level" not in lower:
             continue
-        if variable=="t" and ("pressure-level" not in lower or not re.search(r"(?:^|_)850(?:_|\.)",lower)):
+        if variable in ("t","fi") and ("pressure-level" not in lower or not re.search(r"(?:^|_)"+("850" if variable=="t" else "500")+r"(?:_|\.)",lower)):
             continue
         match=re.search("_"+stamp+r"_(\d{3})(?:_|\.)",lower)
         if match:
@@ -119,9 +119,9 @@ def load_grid(url, valid, bounds, variable):
                     timestamp=datetime.strptime(f"{date:08d}{time:04d}","%Y%m%d%H%M").replace(tzinfo=timezone.utc)
                     if abs((timestamp-valid).total_seconds())>60:
                         continue
-                    if variable=="t":
+                    if variable in ("t","fi"):
                         level=int(codes_get(gid,"level"))
-                        if level!=850:
+                        if level!=(850 if variable=="t" else 500):
                             continue
                     lat=np.asarray(codes_get_array(gid,"latitudes"))
                     lon=np.asarray(codes_get_array(gid,"longitudes"))
@@ -132,7 +132,13 @@ def load_grid(url, valid, bounds, variable):
                     if not mask.any():
                         raise RuntimeError("ICON-EU-Feld deckt die gewählte Region nicht ab.")
                     lat,lon,vals=lat[mask],lon[mask],vals[mask]
-                    if variable=="pmsl":
+                    if variable=="fi":
+                        units=str(codes_get(gid,"units")).lower().replace(" ","")
+                        if "m2" in units or "m**2" in units or "m^2" in units: vals=vals/9.80665/10
+                        elif units in ("gpm","m"): vals=vals/10
+                        else: raise RuntimeError(f"Unbekannte FI-Einheit: {units}")
+                        if not 400<np.nanmedian(vals)<650: raise RuntimeError("Z500-Werte unplausibel.")
+                    elif variable=="pmsl":
                         vals=vals/100.0
                         if not 850<np.nanmedian(vals)<1100:
                             raise RuntimeError("MSLP-Einheiten unerwartet; Karte nicht erstellt.")
@@ -171,6 +177,7 @@ def load_grid(url, valid, bounds, variable):
 GFS_FILTER="https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 GFS_FIELDS={
     "MSLP":("PRMSL","mean_sea_level"),
+    "Z500 + MSLP":("HGT","500_mb"),
     "T850":("TMP","850_mb"),
     "2-m-Temperatur":("TMP","2_m_above_ground"),
     "Taupunkt":("DPT","2_m_above_ground"),
@@ -230,8 +237,10 @@ def load_gfs(url,valid,bounds,parameter):
                     lat,lon,vals=lat[mask],lon[mask],vals[mask]
                     if parameter=="MSLP":vals=vals/100.
                     elif parameter in ("T850","2-m-Temperatur","Taupunkt"):vals=vals-273.15
+                    elif parameter=="Z500 + MSLP":vals=vals/10
                     elif parameter=="Windböen":vals=vals*3.6
                     if not np.isfinite(vals).all():raise RuntimeError("GFS-Feld enthält fehlende Werte.")
+                    if parameter=="Z500 + MSLP" and not 400<np.median(vals)<650:raise RuntimeError("GFS-Z500 unplausibel.")
                     if parameter=="MSLP" and not 850<np.median(vals)<1100:raise RuntimeError("GFS-MSLP unplausibel.")
                     if parameter in ("T850","2-m-Temperatur","Taupunkt") and not -100<np.median(vals)<60:raise RuntimeError("GFS-Temperatur unplausibel.")
                     if parameter=="Windböen" and not 0<=np.median(vals)<250:raise RuntimeError("GFS-Windböen unplausibel.")
@@ -247,12 +256,25 @@ def load_gfs(url,valid,bounds,parameter):
         if path and os.path.exists(path):os.unlink(path)
     raise RuntimeError("GFS-GRIB-Datei enthält kein Feld mit der angeforderten Gültigkeitszeit.")
 
-def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU"):
+def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     bounds=REGIONS[region]
     # A slightly shorter canvas for WW maps; preserve the full geographic extent and native data grid.
     fig,ax=plt.subplots(figsize=(9,7.25 if parameter=="Signifikantes Wetter" else 8),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
-    if parameter=="MSLP":
+    if parameter=="Z500 + MSLP":
+        from matplotlib.colors import LinearSegmentedColormap, Normalize
+        if mslp is None or mslp.shape!=Z.shape: raise RuntimeError("MSLP-Raster fehlt.")
+        anchors=[(480,"#65058C"),(490,"#8500F4"),(500,"#0033E9"),(510,"#008FF7"),
+                 (520,"#00D6EC"),(530,"#00DF81"),(540,"#44E000"),(550,"#E7F500"),
+                 (560,"#FFE600"),(570,"#FFAD00"),(580,"#FF5900"),(590,"#F10B12"),(600,"#DB008D")]
+        cmap=LinearSegmentedColormap.from_list("elbtal_z500",[((v-480)/120,c) for v,c in anchors],N=512)
+        im=ax.contourf(X,Y,Z,levels=np.linspace(480,600,241),cmap=cmap,norm=Normalize(480,600),extend="both")
+        if not np.isfinite(mslp).all() or not 850<np.nanmedian(mslp)<1100:
+            raise RuntimeError("MSLP-Werte für Isobaren ungültig.")
+        lines=ax.contour(X,Y,mslp,levels=np.arange(940,1081,4),colors="#19243A",linewidths=.85,alpha=.9)
+        ax.clabel(lines,inline=True,fontsize=6,fmt="%d")
+        label="Geopotenzielle Höhe 500 hPa (gpdam) · Isobaren MSLP (hPa)"
+    elif parameter=="MSLP":
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         # Fixed, intentionally nonlinear pressure color anchors: vivid reds from 1030 hPa.
         pressure_anchors=[
@@ -375,6 +397,8 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU"):
         cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
     if parameter=="Signifikantes Wetter":
         pass
+    elif parameter=="Z500 + MSLP":
+        cb.set_ticks(np.arange(480,601,10))
     elif parameter=="T850":
         cb.set_ticks(np.arange(-30,31,5))
     elif parameter=="MSLP":
@@ -398,7 +422,7 @@ def show(region):
     model=st.segmented_control("Wettermodell",["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
     st.caption("ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
-    choices=(["MSLP","T850"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model=="ICON-EU" else (["MSLP","T850","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850"])
+    choices=(["MSLP","T850","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model=="ICON-EU" else (["MSLP","T850","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","Z500 + MSLP"])
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
     now_preview=datetime.now(timezone.utc)
     preview_run=now_preview.replace(minute=0,second=0,microsecond=0)
@@ -420,7 +444,7 @@ def show(region):
                     run=run.replace(hour=(run.hour//3)*3)
                     if run not in runs and (model=="GFS" or lead<=78 or run.hour in (0,6,12,18)) and (model!="GFS" or run.hour in (0,6,12,18)):
                         runs.append(run)
-                variable="pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else SURFACE_FIELDS[parameter])
+                variable="pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else ("fi" if parameter=="Z500 + MSLP" else SURFACE_FIELDS[parameter]))
                 selected=None
                 for run in runs:
                     try:
@@ -430,6 +454,10 @@ def show(region):
                     previous_lead=previous_eu_lead(lead)
                     required=[previous_lead,lead] if parameter=="Niederschlagsrate" and previous_lead is not None else [lead]
                     if all(hour in available for hour in required):
+                        if parameter=="Z500 + MSLP" and model=="ICON-EU":
+                            try: pressure_files=discover(run,"pmsl")
+                            except requests.RequestException: continue
+                            if lead not in pressure_files: continue
                         if model=="GFS":
                             try:
                                 # Check the actual GRIB; a URL may precede publication.
@@ -460,7 +488,15 @@ def show(region):
                     Z=classify_ww(Z)
                 if parameter=="Niederschlagsrate" and lead>78:
                     st.info(f"Niederschlagsrate: Mittelwert über die letzten {lead-previous_lead} Stunden (mm/h), nicht einstündiger Niederschlag.")
-                png=render(X,Y,Z,region,parameter,run,valid,model=model)
+                mslp=None
+                if parameter=="Z500 + MSLP":
+                    if model=="ICON-EU":
+                        pressure_files=discover(run,"pmsl")
+                        _,_,mslp=load_grid(pressure_files[lead],valid,REGIONS[region],"pmsl")
+                    else:
+                        pressure_urls=discover_gfs(run,"MSLP",REGIONS[region])
+                        _,_,mslp=load_gfs(pressure_urls[lead],valid,REGIONS[region],"MSLP")
+                png=render(X,Y,Z,region,parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["eu_map"]=(MAP_STYLE_VERSION,model,region,parameter,lead,valid,png)
                 st.caption(f"Verwendeter Modelllauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
                 status.update(label=f"{model}-Karte erstellt",state="complete")
