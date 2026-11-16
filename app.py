@@ -23,6 +23,7 @@ from PIL import Image
 import math
 from pathlib import Path
 from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_release
+from krumet_verify import stations as dwd_stations, hourly_temperature as dwd_hourly_temperature, station_grid_value
 
 BASE = 'https://opendata.dwd.de/weather/nwp/icon-d2/grib'
 LAT_MIN, LAT_MAX = 51.28, 51.50
@@ -749,6 +750,8 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 fog_precip_previous_hour = None
             st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
             images = []
+            if krumet_mode:
+                st.session_state['krumet_station_samples'] = []
             terrain = None
             try:
                 if is_gust or is_precip or is_kind or is_dew or is_fog:
@@ -875,6 +878,12 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                         combined = local + lu_corr
                         combined_png = tuple(render_png(X,Y,combined,run,msg[3],mode='KRUMET · Höhe + WorldCover' if krumet_mode else 'Höhe + WorldCover-Landnutzung · experimentell',correction=combined-Z,show_km_values=flag,model_name='KRUMET' if krumet_mode else 'ICON-D2') for flag in (False,True))
                         diff_png = render_difference(X, Y, combined-Z, run, msg[3],model_name='KRUMET' if krumet_mode else 'ICON-D2')
+                if krumet_mode and terrain is not None:
+                    try:
+                        for sid, name, lat, lon, elevation in dwd_stations():
+                            st.session_state['krumet_station_samples'].append({'Station':name, 'ID':sid, 'Zeit UTC':msg[3], 'ICON-D2':round(station_grid_value(X,Y,Z,lat,lon),2), 'KRUMET':round(station_grid_value(X,Y,local,lat,lon),2)})
+                    except (requests.RequestException,ValueError) as station_error:
+                        st.warning(f'Stationsmetadaten nicht verfügbar: {station_error}')
                 images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
             st.session_state['krumet_images' if krumet_mode else IMAGE_KEYS[parameter_page]] = images
             status.update(label='Karten erstellt', state='complete')
@@ -903,3 +912,32 @@ if image_key in st.session_state:
     st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
                        file_name=f'ELBTAL_{image_key}_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
+
+
+if krumet_mode and st.session_state.get('krumet_station_samples'):
+    with st.expander('🔬 KRUMET vs. ICON-D2 vs. DWD-Messstationen', expanded=False):
+        st.caption('Vergleich nur für bereits berechnete Prognosezeiten. Beobachtungen können verzögert vorliegen; ohne Messwert keine Bewertung. Stationsnahe Rasterwerte sind keine exakte Stationshöhenkorrektur.')
+        import pandas as pd
+        samples = pd.DataFrame(st.session_state['krumet_station_samples'])
+        station_names = sorted(samples['Station'].unique())
+        chosen = st.selectbox('DWD-Messstation', station_names, key='krumet_verify_station')
+        subset = samples[samples['Station']==chosen].copy()
+        sid = str(subset['ID'].iloc[0])
+        if st.button('DWD-Beobachtungen laden und vergleichen', key='krumet_verify_load'):
+            try:
+                observations = dwd_hourly_temperature(sid)
+                comparison = subset.merge(observations, left_on='Zeit UTC', right_on='time', how='left')
+                comparison['ICON-D2-Fehler'] = comparison['ICON-D2'] - comparison['temperature']
+                comparison['KRUMET-Fehler'] = comparison['KRUMET'] - comparison['temperature']
+                display = comparison.rename(columns={'temperature':'DWD gemessen'})[['Zeit UTC','DWD gemessen','ICON-D2','KRUMET','ICON-D2-Fehler','KRUMET-Fehler']]
+                st.dataframe(display, hide_index=True)
+                valid_rows = comparison.dropna(subset=['temperature'])
+                if len(valid_rows):
+                    mae_icon = valid_rows['ICON-D2-Fehler'].abs().mean()
+                    mae_krumet = valid_rows['KRUMET-Fehler'].abs().mean()
+                    st.write(f'Verfügbare Vergleiche: {len(valid_rows)} · MAE ICON-D2: {mae_icon:.2f} °C · MAE KRUMET: {mae_krumet:.2f} °C')
+                    st.caption('Kleine Stichprobe; noch kein Nachweis einer systematischen Verbesserung. Für Strahlungsnächte sind mehrere vollständige Nächte nötig.')
+                else:
+                    st.info('Für diese Prognosezeiten liegen noch keine DWD-Stundenmesswerte vor. Später erneut versuchen.')
+            except (requests.RequestException,ValueError,KeyError,IndexError) as exc:
+                st.warning(f'DWD-Stationsvergleich derzeit nicht verfügbar: {type(exc).__name__}: {exc}')
