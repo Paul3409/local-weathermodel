@@ -119,14 +119,32 @@ def sample_geometry(proj,x0,y0,x1,y1,shape):
     return X,Y,row,col
 
 def draw_boundaries(ax):
-    from icon_eu import borders,plot_geometry,COUNTRIES,STATES
-    for url,lw in ((COUNTRIES,.6),(STATES,.38)):
+    from icon_eu import borders,COUNTRIES,STATES
+    import matplotlib.patheffects as pe
+    # The original map uses dark outlines, which disappear against dark radar
+    # backgrounds and saturated precipitation cells. Draw crisp, high-contrast
+    # borders above the radar image with a dark halo.
+    for url,is_country in ((COUNTRIES,True),(STATES,False)):
         try:
             features=borders(url).get("features",[])
             for feature in features:
-                plot_geometry(ax,feature.get("geometry"),lw)
-        except requests.RequestException:
-            # Missing boundary service must not change actual radar values.
+                geometry=feature.get("geometry") or {}
+                kind=geometry.get("type")
+                coords=geometry.get("coordinates",[])
+                polygons=[coords] if kind=="Polygon" else coords if kind=="MultiPolygon" else []
+                for polygon in polygons:
+                    for ring in polygon:
+                        if len(ring)<2:continue
+                        points=np.asarray(ring,dtype=float)
+                        if points.ndim!=2 or points.shape[1]<2:continue
+                        ax.plot(points[:,0],points[:,1],
+                                color="#f2f7fb" if is_country else "#b5d1e1",
+                                linewidth=1.1 if is_country else .65,
+                                alpha=.95 if is_country else .85,zorder=20,
+                                path_effects=[pe.Stroke(linewidth=2.25 if is_country else 1.4,
+                                                        foreground="#061b2b"),pe.Normal()])
+        except (requests.RequestException,ValueError,TypeError):
+            # Radar must remain available if boundary data is unavailable.
             pass
 
 def render(values,geo,product,stamp):
@@ -157,11 +175,11 @@ def render(values,geo,product,stamp):
                     ticks=[0,10,20,30,40,50,60,70] if product=="WN"
                     else [0,.5,1,2,5,10,20,50,100])
     cb.ax.tick_params(colors="#d6e5f2",labelsize=8)
-    cb.set_label("Radarreflektivität (dBZ)" if product=="RX" else "Niederschlagsintensität (mm/h) · 5-Minuten-Mittel",color="#d6e5f2")
+    cb.set_label("Radarreflektivität (dBZ)" if product=="WN" else "Niederschlagsintensität (mm/h) · 5-Minuten-Mittel",color="#d6e5f2")
     buf=io.BytesIO()
     fig.savefig(buf,format="png",facecolor=fig.get_facecolor(),dpi=120)
     plt.close(fig)
-    label="Radarreflektivität" if product=="RX" else "Radar-Regenrate"
+    label="Radarreflektivität" if product=="WN" else "Radar-Regenrate"
     return frame_png(buf.getvalue(),label,"DWD RADOLAN","Deutschland",stamp,stamp)
 
 def show():
