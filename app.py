@@ -11,6 +11,7 @@ from urllib.parse import urljoin, unquote
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 import numpy as np
 import requests
 import streamlit as st
@@ -293,19 +294,36 @@ def landuse_temperature_correction(landuse, valid, amplitude=1.0):
     return np.clip(correction, -0.8, 0.8)
 
 
-def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None):
+TEMP_STOPS = [(-20,'#9851BD'),(-15,'#4C207F'),(-10,'#16346E'),(-5,'#3377C6'),(0,'#B8E5F4'),(.4999,'#B8E5F4'),(.5,'#174C35'),(5,'#438A49'),(10,'#A9C64D'),(15,'#F0D64B'),(20,'#F5B16C')]
+TEMP_CMAP = LinearSegmentedColormap.from_list('elbtal', [((t+20)/40,c) for t,c in TEMP_STOPS], N=4096)
+TEMP_CMAP.set_under('#9851BD')
+TEMP_CMAP.set_over('#F5B16C')
+TEMP_NORM = Normalize(-20,20)
+
+def draw_km_temperatures(ax, X, Y, Z):
+    """Temperatures interpolated at points roughly 1 km apart; not observations."""
+    dy = 1 / 111.2
+    dx = 1 / (111.2 * math.cos(math.radians((LAT_MIN+LAT_MAX)/2)))
+    latitudes = np.arange(LAT_MIN+dy/2, LAT_MAX, dy)
+    longitudes = np.arange(LON_MIN+dx/2, LON_MAX, dx)
+    points = np.array([(lat,lon) for lat in latitudes for lon in longitudes])
+    values = RegularGridInterpolator((Y[:,0],X[0,:]),Z)(points)
+    for (lat,lon),value in zip(points,values):
+        if np.isfinite(value):
+            ax.text(lon,lat,f'{value:.1f}',ha='center',va='center',fontsize=5.2,
+                    color='#15263a',zorder=7,
+                    bbox=dict(facecolor='white',alpha=.7,edgecolor='none',pad=.4))
+
+def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None, show_km_values=False):
     fig, ax = plt.subplots(figsize=(9, 9.3), dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
-    low = np.floor(np.nanmin(Z) * 2) / 2
-    high = np.ceil(np.nanmax(Z) * 2) / 2
-    if high - low < 2:
-        mid = (low + high) / 2
-        low, high = mid - 1, mid + 1
-    levels = np.linspace(low, high, 21)
-    filled = ax.contourf(X, Y, Z, levels=levels, cmap='coolwarm', extend='both')
-    isolines = np.arange(np.floor(low), np.ceil(high)+.01, .5)
-    contours = ax.contour(X, Y, Z, levels=isolines, colors='#273445', linewidths=.55, alpha=.75)
-    ax.clabel(contours, inline=True, fontsize=7, fmt='%.1f')
+    filled = ax.contourf(X,Y,Z,levels=np.arange(-20,20.001,.1),cmap=TEMP_CMAP,norm=TEMP_NORM,extend='both')
+    zmin,zmax = float(np.nanmin(Z)),float(np.nanmax(Z))
+    isolines = np.arange(np.ceil(zmin*2)/2,np.floor(zmax*2)/2+.01,.5)
+    if len(isolines):
+        ax.contour(X,Y,Z,levels=isolines,colors='#273445',linewidths=.45,alpha=.65)
+    if show_km_values:
+        draw_km_temperatures(ax,X,Y,Z)
     for name, (lat, lon) in PLACES.items():
         if LAT_MIN <= lat <= LAT_MAX and LON_MIN <= lon <= LON_MAX:
             ax.plot(lon, lat, marker='o', color='#101828', markersize=2.5)
@@ -321,7 +339,10 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     fig.suptitle('ELBTAL-T2M  |  2-m-Temperatur', fontsize=16, weight='bold', y=.98)
     ax.set_title(f'{mode}  ·  Lauf: {run:%d.%m.%Y %H:%M} UTC  ·  Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M} MEZ/MESZ', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
-    cb.set_label('2-m-Lufttemperatur (°C)')
+    cb.set_ticks([-20,-15,-10,-5,0,.5,5,10,15,20])
+    cb.set_ticklabels(['−20','−15','−10','−5','0','0,5','5','10','15','20'])
+    cb.ax.tick_params(labelsize=7)
+    cb.set_label('2-m-Lufttemperatur (°C) · feste Skala; Frostnähe < 0,5 °C')
     fig.text(.5, .025, 'DWD ICON-D2 · Geländedaten: AWS Terrain Tiles (Terrarium) · experimentelle Höhenkorrektur' if correction is not None else 'DWD ICON-D2 · interpolierte Originalwerte',
              ha='center', fontsize=8, color='#48566a')
     out = io.BytesIO()
@@ -359,7 +380,7 @@ def render_difference(X, Y, difference, run, valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL-T2M · v0.5.3')
+st.title('🌡️ ELBTAL-T2M · v0.5.4')
 st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
 st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte WorldCover-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
 with st.expander('Landnutzung einmalig vorbereiten', expanded=not LANDUSE_FILE.exists()):
@@ -371,7 +392,7 @@ with st.expander('Landnutzung einmalig vorbereiten', expanded=not LANDUSE_FILE.e
                 st.session_state['prepared_landuse'] = encode_landuse_file(raster, polygon_count)
             st.success(f'{polygon_count} klassifizierte Rasterzellen; {(raster > 0).mean():.1%} Rasterabdeckung. Datei jetzt herunterladen.')
         except Exception as exc:
-            st.error(f'Einmaliger OSM-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}. Bitte später erneut versuchen.')
+            st.error(f'Einmaliger WorldCover-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}. Bitte später erneut versuchen.')
     if 'prepared_landuse' in st.session_state:
         st.download_button('landuse.npz herunterladen', data=st.session_state['prepared_landuse'],
                            file_name='landuse.npz', mime='application/octet-stream')
@@ -413,7 +434,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             if enable_landuse and terrain is not None:
                 try:
                     landuse, polygon_count = load_landuse_file()
-                    st.write(f'OSM-Landnutzung geladen: {polygon_count} klassifizierte Rasterzellen; {(landuse > 0).mean():.0%} Rasterabdeckung')
+                    st.write(f'WorldCover-Landnutzung geladen: {polygon_count} klassifizierte Rasterzellen; {(landuse > 0).mean():.0%} Rasterabdeckung')
                 except Exception as land_error:
                     st.warning(f'Gespeicherte Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
             for idx, hour in enumerate(hours):
@@ -423,17 +444,17 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 target = run + timedelta(hours=hour)
                 msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
                 X, Y, Z = interpolate(*msg[:3])
-                original_png = render_png(X, Y, Z, run, msg[3])
+                original_png = (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True))
                 local_png = None
                 combined_png = None
                 diff_png = None
                 if terrain is not None:
                     local, correction = downscale_temperature(Z, terrain)
-                    local_png = render_png(X, Y, local, run, msg[3], mode='Lokale Höhenkorrektur · experimentell', correction=correction)
+                    local_png = tuple(render_png(X,Y,local,run,msg[3],mode='Lokale Höhenkorrektur · experimentell',correction=correction,show_km_values=flag) for flag in (False,True))
                     if landuse is not None:
                         lu_corr = landuse_temperature_correction(landuse, msg[3])
                         combined = local + lu_corr
-                        combined_png = render_png(X, Y, combined, run, msg[3], mode='Höhe + WorldCover-Landnutzung · experimentell', correction=combined-Z)
+                        combined_png = tuple(render_png(X,Y,combined,run,msg[3],mode='Höhe + WorldCover-Landnutzung · experimentell',correction=combined-Z,show_km_values=flag) for flag in (False,True))
                         diff_png = render_difference(X, Y, combined-Z, run, msg[3])
                 images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
             st.session_state['images'] = images
@@ -455,7 +476,9 @@ if 'images' in st.session_state:
         variants['Höhe + Landnutzung'] = combined_png
         variants['Differenz zu ICON-D2'] = diff_png
     variant = st.radio('Kartentyp', list(variants), horizontal=True)
-    png = variants[variant]
+    show_km_values = st.checkbox('Temperaturzahlen alle ca. 1 km anzeigen', value=False, help='Interpolierte Modelltemperaturen am jeweiligen Punkt, keine Messwerte.')
+    selected_map = variants[variant]
+    png = selected_map if variant == 'Differenz zu ICON-D2' else selected_map[int(show_km_values)]
     st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
                        file_name=f'ELBTAL_T2M_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
