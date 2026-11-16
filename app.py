@@ -129,13 +129,15 @@ def decode_grib(url, parameter='t_2m'):
     return messages
 
 
-def interpolate(lats, lons, vals):
+def interpolate(lats, lons, vals, grid_m=None):
     # Only a buffered area is needed; keep the download decoding manageable.
     keep = (lats >= LAT_MIN-.09) & (lats <= LAT_MAX+.09) & (lons >= LON_MIN-.09) & (lons <= LON_MAX+.09)
     if keep.sum() < 6:
         raise ValueError('Zu wenige ICON-D2-Rasterpunkte im Modellgebiet.')
-    lat_axis = np.linspace(LAT_MIN, LAT_MAX, 245)
-    lon_axis = np.linspace(LON_MIN, LON_MAX, 235)
+    nlat = round((LAT_MAX-LAT_MIN)*111200/grid_m)+1 if grid_m else 245
+    nlon = round((LON_MAX-LON_MIN)*111200*math.cos(math.radians((LAT_MIN+LAT_MAX)/2))/grid_m)+1 if grid_m else 235
+    lat_axis = np.linspace(LAT_MIN, LAT_MAX, nlat)
+    lon_axis = np.linspace(LON_MIN, LON_MAX, nlon)
     X, Y = np.meshgrid(lon_axis, lat_axis)
     # Linear spatial interpolation, not physical 100 m downscaling.
     grid = griddata(np.column_stack([lons[keep], lats[keep]]), vals[keep], (X, Y), method='linear')
@@ -301,7 +303,7 @@ TEMP_CMAP.set_under('#9851BD')
 TEMP_CMAP.set_over('#F5B16C')
 TEMP_NORM = Normalize(-20,20)
 
-def draw_km_temperatures(ax, X, Y, Z):
+def draw_km_temperatures(ax, X, Y, Z, decimals=1):
     """Temperatures interpolated at points roughly 1 km apart; not observations."""
     dy = 1 / 111.2
     dx = 1 / (111.2 * math.cos(math.radians((LAT_MIN+LAT_MAX)/2)))
@@ -314,7 +316,7 @@ def draw_km_temperatures(ax, X, Y, Z):
         if any(abs(lat-p_lat) < .005 and abs(lon-p_lon) < .010 for p_lat,p_lon in PLACES.values()):
             continue
         if np.isfinite(value):
-            ax.text(lon,lat,f'{value:.1f}',ha='center',va='center',fontsize=5.2,
+            ax.text(lon,lat,f'{value:.{decimals}f}',ha='center',va='center',fontsize=5.2,
                     color='#15263a',zorder=7,
                     bbox=dict(facecolor='white',alpha=.7,edgecolor='none',pad=.4))
 
@@ -401,7 +403,7 @@ def render_gust(X,Y,Z,run,valid,show_km_values=False):
     if len(contours):
         ax.contour(X,Y,Z,levels=contours,colors='#263345',linewidths=.6,alpha=.8)
     if show_km_values:
-        draw_km_temperatures(ax,X,Y,Z)
+        draw_km_temperatures(ax,X,Y,Z,decimals=0)
     for name,(lat,lon) in PLACES.items():
         if LAT_MIN<=lat<=LAT_MAX and LON_MIN<=lon<=LON_MAX:
             ax.plot(lon,lat,'o',color='#101828',markersize=2.5,zorder=12)
@@ -547,7 +549,7 @@ def render_fog(X,Y,Z,run,valid):
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌦️ ELBTAL · v0.8.0')
+st.title('🌦️ ELBTAL · v0.8.1')
 st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
 parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen','🌧️ Rate','💧 Summe','❄️ Art','💦 Taupunkt','🌫️ Nebel'], default='🌡️ Temperatur', selection_mode='single')
 is_gust = parameter_page == '🌬️ Windböen'
@@ -687,7 +689,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
                 if abs((msg[3]-target).total_seconds()) > 60:
                     raise RuntimeError(f'Kein exakter Prognosezeitpunkt für +{hour} h vorhanden.')
-                X, Y, Z = interpolate(*msg[:3])
+                X, Y, Z = interpolate(*msg[:3],grid_m=500 if is_fog else None)
                 if is_precip:
                     if is_kind:
                         increments = {}
@@ -732,7 +734,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                         record=min(records,key=lambda m: abs((m[3]-target).total_seconds()))
                         if abs((record[3]-target).total_seconds())>60:
                             raise RuntimeError(f'Zeitstempel für {parameter} +{hour} h fehlt.')
-                        return interpolate(*record[:3])[2]
+                        return interpolate(*record[:3],grid_m=500)[2]
                     t2m=load_fog_field('t_2m')
                     u10=load_fog_field('u_10m')
                     v10=load_fog_field('v_10m')
@@ -750,7 +752,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                             cloud_records=decode_grib(fog_cloud_files['clcl'][hour],'clcl')
                             cloud_record=min(cloud_records,key=lambda m:abs((m[3]-target).total_seconds()))
                             if abs((cloud_record[3]-target).total_seconds())<=60:
-                                low_cloud=interpolate(*cloud_record[:3])[2]
+                                low_cloud=interpolate(*cloud_record[:3],grid_m=500)[2]
                                 # Strong low-cloud cover with nearly saturated air: retain a fog/high-stratus signal.
                                 categories[(low_cloud>=70)&(spread<=1.5)&(wind<=12)] = np.maximum(categories[(low_cloud>=70)&(spread<=1.5)&(wind<=12)],2)
                         except (requests.RequestException,ValueError,RuntimeError) as cloud_error:
@@ -763,7 +765,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                             record=min(records,key=lambda m:abs((m[3]-expected).total_seconds()))
                             if abs((record[3]-expected).total_seconds())>60:
                                 raise RuntimeError(f'Kein exakter Niederschlagszeitpunkt +{lead} h.')
-                            return np.maximum(interpolate(*record[:3])[2],0)
+                            return np.maximum(interpolate(*record[:3],grid_m=500)[2],0)
                         current_accum=fog_accumulation(hour)
                         if fog_precip_previous_hour==hour-1:
                             previous_accum=fog_precip_previous
