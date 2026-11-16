@@ -45,9 +45,9 @@ def discover(run, variable):
             continue
         if variable=="pmsl" and "single-level" not in lower:
             continue
-        if variable=="t" and ("pressure-level" not in lower or not re.search(r"(?:^|_)850(?:_|\\.)",lower)):
+        if variable=="t" and ("pressure-level" not in lower or not re.search(r"(?:^|_)850(?:_|\.)",lower)):
             continue
-        match=re.search("_"+stamp+r"_(\\d{3})(?:_|\\.)",lower)
+        match=re.search("_"+stamp+r"_(\d{3})(?:_|\.)",lower)
         if match:
             result[int(match.group(1))]=urljoin(folder,name)
     return result
@@ -165,7 +165,7 @@ def render(X,Y,Z,region,parameter,run,valid):
     ax.set_xlabel("Längengrad (°O)")
     ax.set_ylabel("Breitengrad (°N)")
     ax.grid(alpha=.15)
-    ax.set_title(f"ELBTAL | ICON-EU {parameter} | {region}\\nLauf {run:%d.%m.%Y %H:%M} UTC · Gültig {valid:%d.%m.%Y %H:%M} UTC",fontsize=11)
+    ax.set_title(f"ELBTAL | ICON-EU {parameter} | {region}\nLauf {run:%d.%m.%Y %H:%M} UTC · Gültig {valid:%d.%m.%Y %H:%M} UTC",fontsize=11)
     cb=fig.colorbar(im,ax=ax,orientation="horizontal",pad=.08,fraction=.05)
     cb.set_label(label)
     output=io.BytesIO()
