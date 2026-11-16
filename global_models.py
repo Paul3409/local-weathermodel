@@ -156,9 +156,11 @@ def climatology_on_grid(X,Y,month):
 def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     import matplotlib.pyplot as plt
     from matplotlib.colors import TwoSlopeNorm
-    from map_design import frame_png
+    from map_design import frame_png, style_figure
     delta=pressure-reference
     fig,ax=plt.subplots(figsize=(9,8),dpi=120)
+    fig.patch.set_facecolor("#061C35")
+    ax.set_facecolor("#061C35")
     bounds=REGIONS[region]
     levels=np.arange(-32,34,2)
     im=ax.contourf(X,Y,delta,levels=levels,cmap="RdBu_r",norm=TwoSlopeNorm(vcenter=0,vmin=-32,vmax=32),extend="both")
@@ -180,8 +182,10 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
         st.caption("Grenzdaten momentan nicht verfügbar.")
     ax.set_xlim(bounds[0],bounds[1]);ax.set_ylim(bounds[2],bounds[3])
     ax.set_xlabel("Längengrad");ax.set_ylabel("Breitengrad")
-    fig.colorbar(im,ax=ax,shrink=.75,label="MSLP-Anomalie (hPa)")
-    ax.set_title(f"ELBTAL | {model} MSLP-Anomalie | {region}\\nLauf {run:%d.%m.%Y %H} UTC · Gültig {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
+    colorbar=fig.colorbar(im,ax=ax,shrink=.75,label="MSLP-Anomalie (hPa)")
+    ax.set_title("MSLP-Anomalie (hPa)",fontsize=13,pad=12)
+    style_figure(fig,ax)
+    colorbar.outline.set_edgecolor("#B5C8DC")
     out=io.BytesIO();fig.savefig(out,format="png",bbox_inches="tight");plt.close(fig)
     return frame_png(out.getvalue(),"MSLP-Anomalie",model,region,run,valid)
 
