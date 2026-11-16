@@ -1,3 +1,4 @@
+from map_design import style_figure, frame_png
 """ELBTAL-T2M v0.5.3 – ESA WorldCover offline land-use raster."""
 import bz2
 import io
@@ -354,10 +355,11 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     cb.set_label('2-m-Taupunkt (°C) · feste Farbskala' if 'Taupunkt' in mode else '2-m-Lufttemperatur (°C) · feste Skala; Frostnähe < 0,5 °C')
     fig.text(.5, .025, 'DWD ICON-D2 · Geländedaten: AWS Terrain Tiles (Terrarium) · experimentelle Höhenkorrektur' if correction is not None else 'DWD ICON-D2 · interpolierte Originalwerte',
              ha='center', fontsize=8, color='#48566a')
+    style_figure(fig, ax)
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return out.getvalue()
+    return frame_png(out.getvalue(), ('Taupunkt' if 'Taupunkt' in mode else 'Temperatur'), 'ICON-D2', 'Elbtal', run, valid)
 
 
 def render_difference(X, Y, difference, run, valid):
@@ -382,10 +384,11 @@ def render_difference(X, Y, difference, run, valid):
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_label('Temperaturabweichung (°C)')
     fig.text(.5, .025, 'Heuristische Höhen- und WorldCover-Korrektur · keine validierte Prognose', ha='center', fontsize=8, color='#48566a')
+    style_figure(fig, ax)
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return out.getvalue()
+    return frame_png(out.getvalue(), 'Temperaturdifferenz', 'ICON-D2', 'Elbtal', run, valid)
 
 
 GUST_STOPS = [(0,'#499FE1'),(10,'#204D99'),(20,'#347B4A'),(30,'#A3BE4B'),(40,'#E8D24A'),(50,'#F3A143'),(60,'#E96A38'),(70,'#DB3834'),(80,'#B9252E'),(90,'#811A2C'),(100,'#48205F'),(110,'#853AA8'),(120,'#C52D9A')]
@@ -425,10 +428,11 @@ def render_gust(X,Y,Z,run,valid,show_km_values=False):
     cb.set_label('Windböen (km/h) · feste Farbskala')
     fig.text(.5,.025,'DWD ICON-D2 · interpolierte Windböen, keine lokale Geländekorrektur',
              ha='center',fontsize=8,color='#48566a')
-    out=io.BytesIO()
+    style_figure(fig, ax)
+    out = io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
     plt.close(fig)
-    return out.getvalue()
+    return frame_png(out.getvalue(), 'Windböen', 'ICON-D2', 'Elbtal', run, valid)
 
 
 
@@ -502,10 +506,11 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
     fig.suptitle('ELBTAL  |  '+parameter_page,fontsize=16,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 · Lauf {run:%d.%m.%Y %H:%M} UTC · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=8,pad=12)
     fig.text(.5,.025,'DWD ICON-D2 · Modellwerte, keine Messungen',ha='center',fontsize=8,color='#48566a')
-    out=io.BytesIO()
+    style_figure(fig, ax)
+    out = io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
     plt.close(fig)
-    return out.getvalue()
+    return frame_png(out.getvalue(), parameter_page, 'ICON-D2', 'Elbtal', run, valid)
 
 
 
@@ -541,10 +546,11 @@ def render_fog(X,Y,Z,run,valid):
     fig.suptitle('ELBTAL | Nebelpotenzial (experimentell)',fontsize=14,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=9)
     fig.text(.5,.025,'Heuristik: Feuchte/Wind/optional tiefe Wolken · Regen separat · keine Nebelwahrscheinlichkeit',ha='center',fontsize=8)
-    out=io.BytesIO()
+    style_figure(fig, ax)
+    out = io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
     plt.close(fig)
-    return out.getvalue()
+    return frame_png(out.getvalue(), 'Nebelpotenzial', 'ICON-D2', 'Elbtal', run, valid)
 
 
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
