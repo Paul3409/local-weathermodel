@@ -35,7 +35,7 @@ def hourly_temperature(station_id):
     listing = requests.get(BASE, headers=HEADERS, timeout=25)
     listing.raise_for_status()
     # DWD CDC ZIPs have a date range in their filenames, not an '_akt' suffix.
-    matches = re.findall(r'href=["\\\']([^"\\\']*stundenwerte_TU_' + re.escape(str(station_id).zfill(5)) + r'_[^"\\\']*?\\.zip)["\\\']', listing.text, re.I)
+    matches = re.findall(r'href=["\']([^"\']*stundenwerte_TU_' + re.escape(str(station_id).zfill(5)) + r'_[^"\']*\.zip)["\']', listing.text, re.I)
     if not matches:
         raise FileNotFoundError(f'Keine aktuelle DWD-Temperaturdatei für Station {station_id}')
     from urllib.parse import urljoin
