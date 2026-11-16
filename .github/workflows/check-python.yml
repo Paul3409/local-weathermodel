@@ -1,0 +1,31 @@
+name: Check ELBTAL Python
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  syntax-and-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile all Python files
+        run: python -m compileall -q .
+      - name: Check essential forecast paths
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          source = Path('app.py').read_text(encoding='utf-8')
+          tree = ast.parse(source)
+          functions = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+          required = {'list_run','decode_grib','interpolate','render_gust','render_precip','render_fog','classify_precipitation'}
+          assert required <= functions, required - functions
+          assert 'quarter_mode' in source
+          assert 'grid_m=500' in source
+          assert "decimals=0" in source
+          assert "range(25)" in source
+          print('ELBTAL syntax and feature presence: OK')
+          PY
