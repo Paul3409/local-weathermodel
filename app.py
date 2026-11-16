@@ -340,7 +340,7 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white', alpha=.25, linewidth=.5)
-    fig.suptitle('ELBTAL-T2M  |  2-m-Temperatur', fontsize=16, weight='bold', y=.98)
+    fig.suptitle('ELBTAL | '+('2-m-Taupunkt' if 'Taupunkt' in mode else '2-m-Temperatur'), fontsize=16, weight='bold', y=.98)
     ax.set_title(f'{mode}  ·  Lauf: {run:%d.%m.%Y %H:%M} UTC  ·  Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M} MEZ/MESZ', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_ticks([-20,-15,-10,-5,0,.5,5,10,15,20])
@@ -348,7 +348,7 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     cb.ax.tick_params(labelsize=7)
     cb.ax.get_xticklabels()[4].set_ha('right')
     cb.ax.get_xticklabels()[5].set_ha('left')
-    cb.set_label('2-m-Lufttemperatur (°C) · feste Skala; Frostnähe < 0,5 °C')
+    cb.set_label('2-m-Taupunkt (°C) · feste Farbskala' if 'Taupunkt' in mode else '2-m-Lufttemperatur (°C) · feste Skala; Frostnähe < 0,5 °C')
     fig.text(.5, .025, 'DWD ICON-D2 · Geländedaten: AWS Terrain Tiles (Terrarium) · experimentelle Höhenkorrektur' if correction is not None else 'DWD ICON-D2 · interpolierte Originalwerte',
              ha='center', fontsize=8, color='#48566a')
     out = io.BytesIO()
@@ -571,12 +571,11 @@ if parameter_page == '🌡️ Temperatur':
       if 'prepared_landuse' in st.session_state:
           st.download_button('landuse.npz herunterladen', data=st.session_state['prepared_landuse'],
                              file_name='landuse.npz', mime='application/octet-stream')
-  if parameter_page == '🌡️ Temperatur':
-    if LANDUSE_FILE.exists():
+  if LANDUSE_FILE.exists():
         st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
     else:
         st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
-    enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
+  enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
 else:
     enable_landuse = False
     if is_gust:
