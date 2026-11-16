@@ -515,15 +515,16 @@ IMAGE_KEYS = {'🌡️ Temperatur':'images_temp','🌬️ Windböen':'images_gus
 
 def render_fog(X,Y,Z,run,valid):
     from matplotlib.colors import ListedColormap, BoundaryNorm
-    colors=['#E8EDF1','#C7E6D7','#72B6A6','#346C89']
+    colors=['#E8EDF1','#C7E6D7','#72B6A6','#346C89','#B39A80']
     cmap=ListedColormap(colors)
     fig,ax=plt.subplots(figsize=(9,9.3),dpi=150)
     fig.patch.set_facecolor('#f6f8fa')
-    bounds=np.arange(-.5,4.5,1)
-    filled=ax.contourf(X,Y,Z,levels=bounds,cmap=cmap,norm=BoundaryNorm(bounds,4))
+    bounds=np.arange(-.5,5.5,1)
+    filled=ax.contourf(X,Y,Z,levels=bounds,cmap=cmap,norm=BoundaryNorm(bounds,5))
     cb=fig.colorbar(filled,ax=ax,orientation='horizontal',fraction=.055,pad=.09)
-    cb.set_ticks(range(4))
-    cb.set_ticklabels(['Gering','Mäßig','Hoch','Sehr hoch'])
+    cb.set_ticks(range(5))
+    cb.set_ticklabels(['Gering','Mäßig','Hoch','Sehr hoch','Regen'])
+    cb.ax.tick_params(labelsize=8)
     for name,(lat,lon) in PLACES.items():
         if LAT_MIN<=lat<=LAT_MAX and LON_MIN<=lon<=LON_MAX:
             ax.plot(lon,lat,'o',color='#101828',markersize=2.5,zorder=12)
@@ -538,7 +539,7 @@ def render_fog(X,Y,Z,run,valid):
     ax.grid(color='white',alpha=.2,linewidth=.5)
     fig.suptitle('ELBTAL | Nebelpotenzial (experimentell)',fontsize=14,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=9)
-    fig.text(.5,.025,'Heuristik: Taupunktdifferenz und 10-m-Wind; keine Nebelwahrscheinlichkeit',ha='center',fontsize=8)
+    fig.text(.5,.025,'Heuristik: Feuchte/Wind; Regen gesondert · keine Nebelwahrscheinlichkeit',ha='center',fontsize=8)
     out=io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
     plt.close(fig)
@@ -583,7 +584,7 @@ else:
     elif is_dew:
         st.caption('ICON-D2-Taupunkt in 2 m Höhe, direktes Modellfeld ohne lokale Korrektur.')
     elif is_fog:
-        st.caption('Experimenteller Nebelindikator aus Taupunktdifferenz und 10-m-Wind; keine Sichtweitenprognose und keine Nebelwahrscheinlichkeit.')
+        st.caption('Experimenteller Nebelindikator aus Taupunktdifferenz und 10-m-Wind. Niederschlag wird gesondert markiert; keine Sichtweitenprognose oder Nebelwahrscheinlichkeit.')
     elif is_kind:
         st.caption('Niederschlagsart aus stündlichen Regen-/Schneeanteilen; Graupel und unklare Fälle grau. Gefrierender Regen wird nicht diagnostiziert.')
     else:
@@ -624,6 +625,20 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     if any(h not in found for h in hours):
                         raise RuntimeError(f'Für Nebel fehlen ICON-D2-Dateien: {p}.')
                     fog_files[p] = found
+                # Accumulated precipitation needs the preceding lead hour to form an hourly rate.
+                fog_precip_files = {}
+                try:
+                    found,_,_ = list_run(run,'tot_prec')
+                    needed = set(hours)
+                    needed.update(h-1 for h in hours if h>0)
+                    if all(h in found for h in needed):
+                        fog_precip_files = found
+                    else:
+                        st.warning('Niederschlagsdateien unvollständig: Nebelindikator ohne Regenabgrenzung.')
+                except requests.RequestException:
+                    st.warning('Niederschlagsdaten nicht erreichbar: Nebelindikator ohne Regenabgrenzung.')
+                fog_precip_previous = None
+                fog_precip_previous_hour = None
             st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
             images = []
             terrain = None
@@ -716,6 +731,24 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     categories[score>=.2]=1
                     categories[score>=.45]=2
                     categories[score>=.7]=3
+                    # Distinguish precipitation-associated saturation from fog-favourable conditions.
+                    if fog_precip_files and hour>0:
+                        def fog_accumulation(lead):
+                            records=decode_grib(fog_precip_files[lead],'tot_prec')
+                            expected=run+timedelta(hours=lead)
+                            record=min(records,key=lambda m:abs((m[3]-expected).total_seconds()))
+                            if abs((record[3]-expected).total_seconds())>60:
+                                raise RuntimeError(f'Kein exakter Niederschlagszeitpunkt +{lead} h.')
+                            return np.maximum(interpolate(*record[:3])[2],0)
+                        current_accum=fog_accumulation(hour)
+                        if fog_precip_previous_hour==hour-1:
+                            previous_accum=fog_precip_previous
+                        else:
+                            previous_accum=fog_accumulation(hour-1)
+                        hourly_rain=np.maximum(current_accum-previous_accum,0)
+                        categories[hourly_rain>=0.1]=4
+                        fog_precip_previous=current_accum
+                        fog_precip_previous_hour=hour
                     original_png=(render_fog(X,Y,categories,run,msg[3]),)*2
                 elif is_dew:
                     original_png=tuple(render_png(X,Y,Z,run,msg[3],mode='ICON-D2 Taupunkt · keine lokale Korrektur',show_km_values=flag) for flag in (False,True))
