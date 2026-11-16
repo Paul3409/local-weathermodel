@@ -59,3 +59,24 @@ def station_grid_value(X, Y, Z, lat, lon):
     i = int(np.abs(Y[:,0]-lat).argmin())
     j = int(np.abs(X[0,:]-lon).argmin())
     return float(Z[i,j])
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def archived_icon_d2(lat, lon, start_date, end_date, lead_days=1):
+    """Archived fixed-lead ICON-D2 forecasts; never current forecasts or reanalysis."""
+    params = {
+        "latitude":lat, "longitude":lon, "start_date":str(start_date),
+        "end_date":str(end_date), "models":"icon_d2",
+        "hourly":",".join(f"{v}_previous_day{lead_days}" for v in
+                           ("temperature_2m","wind_speed_10m","cloud_cover")),
+        "timezone":"GMT", "temperature_unit":"celsius", "wind_speed_unit":"kmh",
+    }
+    response = requests.get("https://previous-runs-api.open-meteo.com/v1/forecast",
+                            params=params, headers=HEADERS, timeout=40)
+    response.raise_for_status()
+    data = response.json().get("hourly",{})
+    result = pd.DataFrame({"time":pd.to_datetime(data["time"],utc=True)})
+    for field in ("temperature_2m","wind_speed_10m","cloud_cover"):
+        key = f"{field}_previous_day{lead_days}"
+        result[field] = pd.to_numeric(data.get(key,[]),errors="coerce")
+    return result
