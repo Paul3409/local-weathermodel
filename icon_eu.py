@@ -24,7 +24,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "snow-v1"
+MAP_STYLE_VERSION = "windchill-v1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -33,7 +33,7 @@ def previous_eu_lead(lead):
     if lead<=78:
         return lead-1
     return lead-3
-SURFACE_FIELDS = {"2-m-Temperatur":"t_2m","Windböen":"vmax_10m","Niederschlagsrate":"tot_prec","Niederschlagssumme":"tot_prec","Taupunkt":"td_2m","Signifikantes Wetter":"ww","Schneehöhe":"h_snow"}
+SURFACE_FIELDS = {"2-m-Temperatur":"t_2m","Windböen":"vmax_10m","Niederschlagsrate":"tot_prec","Niederschlagssumme":"tot_prec","Taupunkt":"td_2m","Signifikantes Wetter":"ww","Schneehöhe":"h_snow","Windchill":"t_2m"}
 PHASE_COMPONENTS=("rain_gsp","rain_con","snow_gsp","snow_con")
 PHASE_COLORS=["#F2F5F7","#278DCE","#F39A43","#F4A4CF","#8C949F"]
 PHASE_LABELS=["Trocken","Regen","Schneeregen","Schnee","Unklar"]
@@ -299,6 +299,9 @@ GFS_FIELDS={
     "Windböen":("GUST","surface"),
     "Schneehöhe":("SNOD","surface"),
     "Neuschneemenge":("ASNOW","surface"),
+    "Windchill":("TMP","2_m_above_ground"),
+    "Windchill-U":("UGRD","10_m_above_ground"),
+    "Windchill-V":("VGRD","10_m_above_ground"),
 }
 @st.cache_data(ttl=600,show_spinner=False)
 def discover_gfs(run,parameter,bounds):
@@ -353,7 +356,7 @@ def load_gfs(url,valid,bounds,parameter):
                     if not mask.any():continue
                     lat,lon,vals=lat[mask],lon[mask],vals[mask]
                     if parameter=="MSLP":vals=vals/100.
-                    elif parameter in ("T850","2-m-Temperatur","Taupunkt"):vals=vals-273.15
+                    elif parameter in ("T850","2-m-Temperatur","Taupunkt","Windchill"):vals=vals-273.15
                     elif parameter=="Z500 + MSLP":vals=vals/10
                     elif parameter=="Windböen":vals=vals*3.6
                     elif parameter in ("Schneehöhe","Neuschneemenge"):vals=vals*100.0
@@ -373,6 +376,18 @@ def load_gfs(url,valid,bounds,parameter):
     finally:
         if path and os.path.exists(path):os.unlink(path)
     raise RuntimeError("GFS-GRIB-Datei enthält kein Feld mit der angeforderten Gültigkeitszeit.")
+
+def windchill_celsius(temp_c, u_ms, v_ms):
+    """North-American/Canadian wind chill, using 10-m model wind as a proxy.
+
+    Only defined for T <= 10 C and wind > 4.8 km/h. Outside that domain,
+    show air temperature rather than extrapolating the wind-chill formula.
+    """
+    speed_kmh=np.hypot(u_ms,v_ms)*3.6
+    if not (np.isfinite(temp_c).all() and np.isfinite(speed_kmh).all()):
+        raise RuntimeError("Windchill-Eingangsdaten enthalten ungültige Werte.")
+    calculated=13.12+0.6215*temp_c-11.37*np.power(np.maximum(speed_kmh,0.01),0.16)+0.3965*temp_c*np.power(np.maximum(speed_kmh,0.01),0.16)
+    return np.where((temp_c<=10)&(speed_kmh>4.8),calculated,temp_c)
 
 SNOW_STOPS=[(0.1,"#1BC33A"),(0.5,"#D8F6FC"),(1,"#A5E8F8"),(2,"#6DCEEF"),(5,"#339EDB"),(10,"#1765B9"),(20,"#5949BA"),(30,"#9853C8"),(50,"#D95AB6"),(75,"#EF779A"),(100,"#F7C7DF"),(150,"#FFFFFF")]
 def snow_water_mask(X,Y):
@@ -492,6 +507,9 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         from matplotlib.colors import LinearSegmentedColormap, Normalize
         if parameter=="2-m-Temperatur":
             stops,vmin,vmax=TEMP_STOPS,-20,20
+        elif parameter=="Windchill":
+            stops,vmin,vmax=TEMP_STOPS,-20,20
+            label="Windchill (°C; T2m + Wind 10 m)"
             label="2-m-Temperatur (°C)"
         elif parameter=="Taupunkt":
             stops,vmin,vmax=TEMP_STOPS,-20,20
@@ -510,7 +528,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         cmap=LinearSegmentedColormap.from_list("elbtal_germany",[((v-vmin)/(vmax-vmin),color) for v,color in stops],N=2048)
         norm=Normalize(vmin=vmin,vmax=vmax)
         im=ax.contourf(X,Y,Z,levels=np.linspace(vmin,vmax,161),cmap=cmap,norm=norm,extend="both")
-        if parameter in ("2-m-Temperatur","Taupunkt"):
+        if parameter in ("2-m-Temperatur","Taupunkt","Windchill"):
             contours=np.arange(-20,21,2)
         elif parameter=="Windböen":
             contours=np.arange(0,121,10)
@@ -552,7 +570,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         cb.set_ticks(np.arange(-30,31,5))
     elif parameter=="MSLP":
         cb.set_ticks([950,970,985,995,1005,1015,1030,1045,1060])
-    elif parameter in ("2-m-Temperatur","Taupunkt"):
+    elif parameter in ("2-m-Temperatur","Taupunkt","Windchill"):
         cb.set_ticks(np.arange(-20,21,5))
     elif parameter=="Windböen":
         cb.set_ticks(np.arange(0,121,10))
@@ -573,11 +591,14 @@ def show(region):
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
     choices=(["MSLP","T850","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","Z500 + MSLP"])
     choices += ["Neuschneemenge","Schneehöhe"]
+    if "Windchill" not in choices: choices.append("Windchill")
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
     if parameter=="Neuschneemenge":
         st.caption("ICON: aus akkumuliertem Schneewasseräquivalent (SNOW_GSP + SNOW_CON), 10:1-Umrechnung; Schätzung, keine prognostizierte Schneedeckenänderung. GFS: akkumulierte Schneefallhöhe (ASNOW), falls verfügbar.")
     elif parameter=="Schneehöhe":
         st.caption("Schneedecke zum Gültigkeitszeitpunkt: ICON H_SNOW / GFS SNOD; nicht der seit Modellstart gefallene Schnee.")
+    elif parameter=="Windchill":
+        st.caption("Berechnete Windchill-Temperatur aus 2-m-Lufttemperatur und 10-m-Wind (U/V), nicht aus Böen. Formel nur bei ≤ 10 °C und Wind > 4,8 km/h; sonst Lufttemperatur. Keine vollständige gefühlte Temperatur (Sonne/Feuchte fehlen).")
     now_preview=datetime.now(timezone.utc)
     preview_run=now_preview.replace(minute=0,second=0,microsecond=0)
     preview_run=preview_run.replace(hour=(preview_run.hour//6)*6)
@@ -608,7 +629,25 @@ def show(region):
                     previous_lead=previous_eu_lead(lead)
                     required=[previous_lead,lead] if parameter=="Niederschlagsrate" and previous_lead is not None else [lead]
                     if all(hour in available for hour in required):
-                        if parameter=="Neuschneemenge" and model!="GFS":
+                        if parameter=="Windchill" and model!="GFS":
+                            try:
+                                getfiles=discover_d2 if model=="ICON-D2" else discover
+                                u_files=getfiles(run,"u_10m")
+                                v_files=getfiles(run,"v_10m")
+                            except requests.RequestException: continue
+                            if lead not in u_files or lead not in v_files: continue
+                        if parameter=="Windchill":
+                    if model=="GFS":
+                        u_url=discover_gfs(run,"Windchill-U",REGIONS[region])[lead]
+                        v_url=discover_gfs(run,"Windchill-V",REGIONS[region])[lead]
+                        _,_,u=load_gfs(u_url,valid,REGIONS[region],"Windchill-U")
+                        _,_,v=load_gfs(v_url,valid,REGIONS[region],"Windchill-V")
+                    else:
+                        getfiles=discover_d2 if model=="ICON-D2" else discover
+                        _,_,u=load_grid(getfiles(run,"u_10m")[lead],valid,REGIONS[region],"u_10m")
+                        _,_,v=load_grid(getfiles(run,"v_10m")[lead],valid,REGIONS[region],"v_10m")
+                    Z=windchill_celsius(Z,u,v)
+                if parameter=="Neuschneemenge" and model!="GFS":
                             try: extra=discover_d2(run,"snow_con") if model=="ICON-D2" else discover(run,"snow_con")
                             except requests.RequestException: continue
                             if lead not in extra: continue
@@ -618,6 +657,10 @@ def show(region):
                             if lead not in pressure_files: continue
                         if model=="GFS":
                             try:
+                                if parameter=="Windchill":
+                                    for component in ("Windchill-U","Windchill-V"):
+                                        wind_urls=discover_gfs(run,component,REGIONS[region])
+                                        load_gfs(wind_urls[lead],run+timedelta(hours=lead),REGIONS[region],component)
                                 # Check the actual GRIB; a URL may precede publication.
                                 load_gfs(available[lead],run+timedelta(hours=lead),REGIONS[region],parameter)
                             except (requests.RequestException,RuntimeError,ValueError,OSError) as exc:
