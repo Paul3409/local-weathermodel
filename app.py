@@ -985,13 +985,37 @@ if krumet_mode:
                             if valid.empty:
                                 st.info('Für diese Nacht hat das ICON-D2-Archiv keine passenden 24-h-Prognosen geliefert.')
                             else:
+                                # Historical KRUMET station-point approximation: same terrain and
+                                # cold-pool equations, but Open-Meteo point forecasts instead of
+                                # the original ICON-D2 GRIB fields; report separately.
+                                try:
+                                    terrain_hist = get_terrain((LAT_MIN,LAT_MAX,LON_MIN,LON_MAX))
+                                    ny,nx = terrain_hist.shape
+                                    iy = int(np.clip(round((lat-LAT_MIN)/(LAT_MAX-LAT_MIN)*(ny-1)),0,ny-1))
+                                    ix = int(np.clip(round((lon-LON_MIN)/(LON_MAX-LON_MIN)*(nx-1)),0,nx-1))
+                                    _, terrain_corr = downscale_temperature(np.zeros_like(terrain_hist),terrain_hist)
+                                    local_times = valid['time'].dt.tz_convert('Europe/Berlin')
+                                    night_factor = np.maximum(0,np.cos((local_times.dt.hour.to_numpy()-3)*np.pi/12))
+                                    dy = (LAT_MAX-LAT_MIN)*111200/(ny-1)
+                                    dx = (LON_MAX-LON_MIN)*111200*math.cos(math.radians((LAT_MIN+LAT_MAX)/2))/(nx-1)
+                                    valley = np.clip((gaussian_filter(terrain_hist,(10000/dy,10000/dx))[iy,ix]-terrain_hist[iy,ix])/100,0,1)
+                                    calm = np.clip((18-valid['wind_speed_10m'].to_numpy())/15,0,1)
+                                    clear = np.clip((85-valid['cloud_cover'].to_numpy())/70,0,1)
+                                    cold = -1.5*night_factor*valley*calm*clear
+                                    valid['KRUMET-Proxy'] = valid['temperature_2m']+terrain_corr[iy,ix]+cold
+                                    valid['KRUMET-Proxy-Fehler'] = valid['KRUMET-Proxy']-valid['temperature']
+                                    st.metric('KRUMET-v0.3-Proxy MAE',f"{valid['KRUMET-Proxy-Fehler'].abs().mean():.2f} °C")
+                                    st.caption('KRUMET-Proxy: dieselben Gelände-/Kaltluftformeln wie v0.3, aber historische Open-Meteo-Punktdaten statt originaler ICON-D2-GRIB-Felder. Daher kein exakter KRUMET-Reforecast.')
+                                except (requests.RequestException,ValueError,RuntimeError) as proxy_error:
+                                    st.warning(f'Historischer KRUMET-Proxy nicht berechenbar: {proxy_error}')
                                 st.metric('ICON-D2 MAE (24 h Vorlauf)',f"{valid['ICON-D2-Fehler'].abs().mean():.2f} °C")
                                 st.metric('ICON-D2 mittlere Abweichung',f"{valid['ICON-D2-Fehler'].mean():+.2f} °C",help='Positiv bedeutet: ICON-D2 zu mild.')
-                                plot = valid.set_index('Ortszeit')[['temperature','temperature_2m']].rename(columns={'temperature':'DWD gemessen','temperature_2m':'ICON-D2 archiviert'})
+                                plot_columns = ['temperature','temperature_2m'] + (['KRUMET-Proxy'] if 'KRUMET-Proxy' in valid else [])
+                                plot = valid.set_index('Ortszeit')[plot_columns].rename(columns={'temperature':'DWD gemessen','temperature_2m':'ICON-D2 archiviert'})
                                 st.line_chart(plot,y_label='Temperatur (°C)')
                                 st.dataframe(valid[['Ortszeit','temperature','temperature_2m','ICON-D2-Fehler','wind_speed_10m','cloud_cover']].rename(columns={'temperature':'DWD gemessen','temperature_2m':'ICON-D2 archiviert','wind_speed_10m':'Wind (km/h)','cloud_cover':'Bewölkung (%)'}),hide_index=True)
                                 st.caption('Quelle: Open-Meteo Previous Runs, Modell ICON-D2, feste 24-h-Vorlaufzeit. Modellwerte können durch Open-Meteo-Interpolation und Höhenanpassung von den originalen DWD-GRIB-Rasterwerten abweichen.')
-                                st.info('Ein historischer KRUMET-v0.3-Vergleich ist noch nicht enthalten: Dafür müssen wir die damaligen räumlichen ICON-D2-Felder rekonstruieren. Ein pauschaler Temperaturabzug wäre kein fairer KRUMET-Test.')
+                                st.caption('Für eine exakte historische KRUMET-Rechnung benötigen wir weiterhin die damaligen vollständigen ICON-D2-GRIB-Felder.')
                         except (requests.RequestException,ValueError,KeyError,IndexError) as archive_error:
                             st.warning(f'Archivierte ICON-D2-Prognosen nicht abrufbar: {type(archive_error).__name__}: {archive_error}')
         except (requests.RequestException,ValueError,KeyError,FileNotFoundError) as exc:
