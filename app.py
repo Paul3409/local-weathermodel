@@ -434,30 +434,27 @@ PREC_SUM = [(0,'#F2F5F7'),(.5,'#D1F2ED'),(1,'#91DCD8'),(2,'#51B9D4'),(5,'#3787C1
 PREC_KIND_COLORS = ['#F2F5F7','#278DCE','#F39A43','#F4A4CF','#D93455','#8C949F']
 
 
-def classify_precipitation(run,hour,files,valid,X,Y,total_hourly):
-    """Separate modelled liquid/solid components; unknown if not safely classifiable."""
-    if hour == 0:
-        return np.zeros_like(total_hourly,dtype=int)
-    component_arrays = []
-    for parameter in ('rain_gsp','rain_con','snow_gsp','snow_con'):
-        pfiles,_,_ = list_run(run,parameter)
-        if hour not in pfiles:
-            raise RuntimeError(f'Niederschlagsart benötigt {parameter} +{hour} h; nicht verfügbar.')
-        msgs = decode_grib(pfiles[hour],parameter)
-        msg = min(msgs,key=lambda m: abs((m[3]-valid).total_seconds()))
-        _,_,arr = interpolate(*msg[:3])
-        component_arrays.append(np.maximum(arr,0))
-    liquid = component_arrays[0]+component_arrays[1]
-    solid = component_arrays[2]+component_arrays[3]
-    result = np.full(total_hourly.shape,5,dtype=int)
-    result[total_hourly < .05] = 0
-    wet = total_hourly >= .05
-    enough = liquid+solid > .02
-    result[wet & enough & (solid/(liquid+solid+1e-9)<.1)] = 1
-    result[wet & enough & (solid/(liquid+solid+1e-9)>.9)] = 3
-    result[wet & enough & (solid/(liquid+solid+1e-9)>=.1) & (solid/(liquid+solid+1e-9)<=.9)] = 2
-    # Freezing rain is deliberately not inferred from surface temperature.
+def classify_precipitation(hourly_total, hourly_rain, hourly_snow, hourly_graupel):
+    """Classify hourly increments, not cumulative model-run totals.
+
+    0 dry, 1 rain, 2 mixed rain/snow, 3 snow, 5 uncertain.
+    Graupel is not silently counted as rain or snow. Freezing rain requires
+    independent WW diagnostics and is not asserted here.
+    """
+    result = np.full(hourly_total.shape, 5, dtype=int)
+    wet = hourly_total >= .05
+    result[~wet] = 0
+    known = hourly_rain + hourly_snow
+    graupel_significant = hourly_graupel > np.maximum(.02, .1 * hourly_total)
+    valid = wet & (known > .02) & ~graupel_significant
+    # Unaccounted precipitation may include additional hydrometeors.
+    valid &= np.abs(hourly_total - known - hourly_graupel) <= np.maximum(.1, .2 * hourly_total)
+    snow_fraction = hourly_snow / np.maximum(known, 1e-9)
+    result[valid & (snow_fraction < .1)] = 1
+    result[valid & (snow_fraction >= .1) & (snow_fraction <= .9)] = 2
+    result[valid & (snow_fraction > .9)] = 3
     return result
+
 
 
 def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
@@ -541,7 +538,12 @@ if not is_gust and not is_precip:
     enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
 else:
     enable_landuse = False
-    st.caption('DWD-ICON-D2-Windböen ohne experimentelle Temperaturkorrekturen.')
+    if is_gust:
+        st.caption('DWD-ICON-D2-Windböen ohne experimentelle Temperaturkorrekturen.')
+    elif is_kind:
+        st.caption('Niederschlagsart aus stündlichen Regen-/Schneeanteilen; Graupel und unklare Fälle grau. Gefrierender Regen wird nicht diagnostiziert.')
+    else:
+        st.caption('ICON-D2-Niederschlag als Wasseräquivalent. Rate = stündliche Akkumulationsdifferenz.')
 start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +12 h)', options=list(range(13)), value=(0, 6), format_func=lambda h: f'+{h} h')
 st.caption(f'Es werden nur die Stunden +{start_hour} bis +{end_hour} (einschließlich) heruntergeladen und gezeichnet.')
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
@@ -566,10 +568,10 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                 raise RuntimeError(f'Kein ICON-D2-Lauf mit allen Stunden +{start_hour} bis +{end_hour} gefunden. Siehe DWD-Diagnose oben.')
             run, files, hours = selected
             if is_precip:
-                # Retrieve all preceding steps to establish the accumulation baseline.
-                hours = list(range(0, end_hour + 1))
+                # All preceding hours are needed for hourly precipitation differences.
+                hours = list(range(0, end_hour + 1)) if (is_kind or parameter_page == '🌧️ Rate') else list(range(start_hour,end_hour+1))
                 if any(h not in files for h in hours):
-                    raise RuntimeError('Für die Niederschlagssumme fehlen benötigte frühere Stunden.')
+                    raise RuntimeError('Für die Niederschlagsberechnung fehlen benötigte Stunden.')
             st.write(f'Gefundener Modelllauf: {run:%Y-%m-%d %H:%M} UTC')
             images = []
             terrain = None
@@ -588,22 +590,48 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     st.write(f'WorldCover-Landnutzung geladen: {polygon_count} klassifizierte Rasterzellen; {(landuse > 0).mean():.0%} Rasterabdeckung')
                 except Exception as land_error:
                     st.warning(f'Gespeicherte Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
-            precip_total = None
             precip_previous = None
+            phase_previous = {}
+            phase_files = {}
+            if is_kind:
+                for component in ('rain_gsp','rain_con','snow_gsp','snow_con','grau_gsp'):
+                    available_files,_,_ = list_run(run,component)
+                    if any(h not in available_files for h in range(0,end_hour+1)):
+                        raise RuntimeError(f'Für Niederschlagsart fehlen Daten: {component} +0 bis +{end_hour} h.')
+                    phase_files[component] = available_files
             for idx, hour in enumerate(hours):
                 st.write(f'Lade und zeichne +{hour} h ({idx+1}/{len(hours)}) …')
                 messages = decode_grib(files[hour], 'tot_prec' if is_precip else ('vmax_10m' if is_gust else 't_2m'))
-                # Hourly files can contain multiple 15-minute messages: choose exact valid time.
+                # Select the exact hourly forecast time, never a neighboring quarter-hour.
                 target = run + timedelta(hours=hour)
                 msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
+                if abs((msg[3]-target).total_seconds()) > 60:
+                    raise RuntimeError(f'Kein exakter Prognosezeitpunkt für +{hour} h vorhanden.')
                 X, Y, Z = interpolate(*msg[:3])
                 if is_precip:
+                    if is_kind:
+                        increments = {}
+                        for component,component_files in phase_files.items():
+                            component_messages = decode_grib(component_files[hour],component)
+                            component_msg = min(component_messages,key=lambda m: abs((m[3]-target).total_seconds()))
+                            if abs((component_msg[3]-target).total_seconds()) > 60:
+                                raise RuntimeError(f'Zeitstempel stimmt nicht: {component} +{hour} h.')
+                            _,_,component_grid = interpolate(*component_msg[:3])
+                            if component in phase_previous:
+                                increments[component] = np.maximum(component_grid-phase_previous[component],0)
+                            else:
+                                increments[component] = np.zeros_like(component_grid)
+                            phase_previous[component] = component_grid
                     # TOT_PREC is the accumulated water equivalent since model initialization.
                     # Each hourly difference is a one-hour mean rate in mm/h.
+                    if not np.isfinite(Z).all():
+                        raise RuntimeError('Ungültige Niederschlagswerte im Modellfeld.')
                     Z = np.maximum(Z,0)
                     if precip_previous is None:
                         hourly = np.zeros_like(Z)
                     else:
+                        if np.nanmin(Z-precip_previous) < -.1:
+                            raise RuntimeError('Niederschlagsakkumulation fällt unerwartet ab; Daten prüfen.')
                         hourly = np.maximum(Z-precip_previous,0)
                     precip_previous = Z.copy()
                     if hour < start_hour:
@@ -611,7 +639,10 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     display = hourly if parameter_page == '🌧️ Rate' else Z
                     if is_kind:
                         # Separate rain/snow components are needed; no temperature-only guessing.
-                        display = classify_precipitation(run,hour,files,msg[3],X,Y,hourly)
+                        display = classify_precipitation(hourly,
+                            increments['rain_gsp']+increments['rain_con'],
+                            increments['snow_gsp']+increments['snow_con'],
+                            increments['grau_gsp'])
                         original_png = (render_precip(X,Y,display,run,msg[3],parameter_page),)*2
                     else:
                         original_png = tuple(render_precip(X,Y,display,run,msg[3],parameter_page,flag) for flag in (False,True))
@@ -630,7 +661,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                         diff_png = render_difference(X, Y, combined-Z, run, msg[3])
                 images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
             st.session_state[{'🌡️ Temperatur':'images_temp','🌬️ Windböen':'images_gust','🌧️ Rate':'images_rate','💧 Summe':'images_sum','❄️ Art':'images_kind'}[parameter_page]] = images
-            status.update(label='Temperaturkarten erstellt', state='complete')
+            status.update(label='Karten erstellt', state='complete')
         except Exception as exc:
             status.update(label='Abruf oder Verarbeitung fehlgeschlagen', state='error')
             st.error(f'{type(exc).__name__}: {exc}')
