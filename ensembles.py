@@ -34,16 +34,10 @@ FIELDS={"MSLP":"msl","T850":"t850","T2":"t2","T2 + Niederschlag":"t2","Neuschnee
 COLORS=["#1DC6EE","#30B79C","#81C56D","#E2BF61","#E77D5F","#B07DD3"]
 HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.0"}
 
+from model_cycles import recent_cycles
+
 def runs(model):
-    now=datetime.now(timezone.utc)
-    hours=(0,6,12,18) if model=="GEFS" else (0,6,12,18)
-    result=[]
-    # Operational products arrive with a delay: prefer a completed cycle.
-    for back in range(9,36,3):
-        dt=(now-timedelta(hours=back)).replace(minute=0,second=0,microsecond=0)
-        dt=dt.replace(hour=max(h for h in hours if h<=dt.hour))
-        if dt not in result and now-dt<=timedelta(hours=30):result.append(dt)
-    return result
+    return recent_cycles(model)
 
 def read_point(data,lat,lon,expected):
     if not data.startswith(b"GRIB"):raise RuntimeError("Keine GRIB-Daten erhalten")
@@ -158,23 +152,26 @@ def fetch(model,run,field,lat,lon,steps):
 
 def draw(model,place,run,field,steps,data,precip=None):
     from matplotlib.ticker import MaxNLocator
+    from matplotlib.patches import FancyBboxPatch, Arc
+    from matplotlib.lines import Line2D
     times=[(run+timedelta(hours=h)).astimezone(LOCAL_TZ) for h in steps]
     plt.rcParams.update({"font.family":"DejaVu Sans"})
-    fig,ax=plt.subplots(figsize=(12,8),dpi=135)
-    fig.patch.set_facecolor(NAVY);ax.set_facecolor("#0C2946")
-    fig.subplots_adjust(left=.085,right=.96,top=.79,bottom=.20)
+    fig=plt.figure(figsize=(12,9),dpi=135,facecolor=NAVY)
+    ax=fig.add_axes([.075,.25,.88,.45],facecolor="#0C2946")
     for i,row in enumerate(data):
-        ax.plot(times,row,color=COLORS[i%len(COLORS)],lw=.85,alpha=.52)
+        # Control is highlighted separately, not duplicated as an ensemble perturbation.
+        if model=="GEFS" and i==0:continue
+        ax.plot(times,row,color=COLORS[i%len(COLORS)],lw=.9,alpha=.62)
     mean=np.nanmean(data,axis=0)
-    ax.plot(times,mean,color="white",lw=3,label="Ensemble-Mittel",zorder=6)
+    ax.plot(times,mean,color="white",lw=3,label="Mittelwert",zorder=6)
     if model=="GEFS" and np.isfinite(data[0]).any():
-        ax.plot(times,data[0],color="#41F277",lw=2,label="Kontrolllauf",zorder=7)
+        ax.plot(times,data[0],color="#41F277",lw=2.3,label="Kontrolllauf",zorder=7)
     ax.grid(color="#6C8BA5",alpha=.3,linestyle="--")
-    ax.tick_params(colors="#D9E8F6")
+    ax.tick_params(colors="#D9E8F6",labelsize=10)
     for spine in ax.spines.values():spine.set_color("#5CA8D4")
     ylabel={"msl":"Luftdruck (hPa)","t850":"850-hPa-Temperatur (°C)",
             "t2":"2-m-Temperatur (°C)","snow":"Schneehöhenzuwachs (cm)" if model=="GEFS" else "Schneefall-Wasseräquivalent (mm)"}[field]
-    ax.set_ylabel(ylabel,color="white")
+    ax.set_ylabel(ylabel,color="white",fontsize=11)
     if field in ("t2","t850"):ax.axhline(0,color="#D9E8F6",ls="--",lw=1)
     ax.xaxis.set_major_locator(DayLocator(interval=2))
     ax.xaxis.set_major_formatter(DateFormatter("%d.%m",tz=LOCAL_TZ))
@@ -186,18 +183,50 @@ def draw(model,place,run,field,steps,data,precip=None):
         ax2.bar(times,rain,width=.55,color="#44B9F0",alpha=.23)
         ax2.set_ylabel("Niederschlag (mm / Intervall)",color="#83D8FF")
         ax2.tick_params(axis="y",colors="#83D8FF")
-    fig.text(.045,.952,"ELBTAL",color="white",fontsize=25,fontweight="bold")
-    fig.text(.045,.916,"W E T T E R K A R T E N",color="#45C8F5",fontsize=9)
-    title={"msl":"MSLP","t850":"T850","t2":"T2","snow":"Schneehöhe"}[field]
-    if field=="snow":title="Schneehöhenzuwachs" if model=="GEFS" else "Schneefall-Wasseräquivalent"
+    # ELBTAL cloud mark in the same cyan line style as the weather map frames.
+    for x,y,w,h,t1,t2 in [(.023,.919,.036,.037,0,180),(.039,.931,.051,.055,0,180),(.075,.918,.037,.039,0,180)]:
+        fig.add_artist(Arc((x+w/2,y+h/2),w,h,theta1=t1,theta2=t2,
+                           color="#45C8F5",lw=2.4,transform=fig.transFigure))
+    fig.add_artist(Line2D([.032,.098],[.92,.92],color="#45C8F5",lw=2.4,transform=fig.transFigure))
+    fig.text(.125,.94,"ELBTAL",color="white",fontsize=24,fontweight="bold")
+    fig.text(.125,.91,"W E T T E R K A R T E N",color="#45C8F5",fontsize=9)
+    fig.add_artist(Line2D([.37,.37],[.906,.977],color="#45C8F5",lw=1.5,transform=fig.transFigure))
+    title={"msl":"MSLP","t850":"T850","t2":"T2","snow":"Schneehöhenzuwachs" if model=="GEFS" else "Schneefall-Wasseräquivalent"}[field]
     if precip is not None:title="T2 + Niederschlag"
-    fig.text(.42,.95,f"Ensemble · {title}",color="white",fontsize=20,fontweight="bold")
-    fig.text(.42,.91,f"{model} · {place}",color="#A9C3D9",fontsize=12)
-    fig.text(.045,.85,f"Modelllauf: {run:%d.%m.%Y %H} UTC  ·  Zeitraum: +{steps[0]} bis +{steps[-1]} h",color="#C5D8E9",fontsize=11)
-    fig.text(.045,.055,f"Daten: {'NOAA' if model=='GEFS' else 'ECMWF'} · {place}",color="#A9C3D9",fontsize=10)
-    fig.text(.79,.055,f"ELBTAL V{VERSION}",color="white",fontsize=11,fontweight="bold")
-    ax.legend(loc="upper right",facecolor="#0C2946",labelcolor="white",edgecolor="#406080",fontsize=9)
-    out=io.BytesIO();fig.savefig(out,format="png",facecolor=fig.get_facecolor());plt.close(fig)
+    fig.text(.40,.948,f"Ensemble · {title}",color="white",fontsize=19,fontweight="bold")
+    fig.text(.40,.913,f"{model}  ·  {place}",color="#A9C3D9",fontsize=11)
+    valid=(run+timedelta(hours=steps[-1])).astimezone(LOCAL_TZ)
+    cells=[
+        ("MODELLLAUF",run.strftime("%d.%m.%Y · %H:%M UTC")),
+        ("GÜLTIG BIS",valid.strftime("%d.%m.%Y · %H:%M %Z")),
+        ("PROGNOSE",f"+{steps[-1]} h"),
+    ]
+    for i,(label,value) in enumerate(cells):
+        x=.026+i*.324
+        fig.add_artist(FancyBboxPatch((x,.79),.303,.093,
+             boxstyle="round,pad=0.008,rounding_size=0.01",
+             linewidth=1.3,edgecolor="#287CA6",facecolor="#0C2946",
+             transform=fig.transFigure))
+        fig.text(x+.015,.855,label,color="#A9C3D9",fontsize=9,fontweight="bold")
+        fig.text(x+.015,.815,value,color="white",fontsize=11,fontweight="bold")
+    # Full P01-P30 legend, with a separate control and ensemble mean.
+    handles=[Line2D([0],[0],color=COLORS[i%len(COLORS)],lw=1.8,
+                     label=f"P{i:02d}") for i in range(1,(31 if model=="GEFS" else 51))]
+    handles.extend([Line2D([0],[0],color="#41F277",lw=2.8,label="CONTROL")] if model=="GEFS" else [])
+    handles.append(Line2D([0],[0],color="white",lw=3,label="AVG"))
+    legend=fig.legend(handles=handles,loc="lower center",
+             bbox_to_anchor=(.5,.115),ncol=11 if model=="GEFS" else 13,
+             fontsize=7.5,frameon=False,columnspacing=.9,handlelength=1.7)
+    for t in legend.get_texts():t.set_color("#D9E8F6")
+    fig.add_artist(FancyBboxPatch((.025,.027),.95,.055,
+        boxstyle="round,pad=0.007,rounding_size=0.009",
+        linewidth=1.2,edgecolor="#287CA6",facecolor="#0C2946",
+        transform=fig.transFigure))
+    fig.text(.045,.046,f"Daten: {'NOAA' if model=='GEFS' else 'ECMWF'}  |  Ort: {place}",
+             color="#A9C3D9",fontsize=10)
+    fig.text(.82,.046,f"ELBTAL V{VERSION}",color="white",fontsize=11,fontweight="bold")
+    out=io.BytesIO();fig.savefig(out,format="png",facecolor=fig.get_facecolor())
+    plt.close(fig)
     return out.getvalue()
 
 def show():
@@ -205,7 +234,8 @@ def show():
     model=st.segmented_control("Ensemble",["GEFS","ECMWF ENS"],default="GEFS",key="ens_model")
     place=st.selectbox("Ort",list(PLACES),key="ens_place")
     parameter=st.selectbox("Parameter",list(FIELDS),key="ens_param")
-    run=st.selectbox("Modelllauf (UTC)",runs(model),format_func=lambda x:x.strftime("%d.%m.%Y %H UTC"),key="ens_run")
+    run=st.selectbox("Vier letzte berechnete Modellzyklen (UTC)",runs(model),format_func=lambda x:x.strftime("%d.%m.%Y %H UTC"),key="ens_run")
+    st.caption("UTC bezeichnet die Modellinitialisierung. Die neuesten Zyklen werden erst nach einer Bereitstellungsfrist angeboten; einzelne Prognosedaten können dennoch fehlen.")
     horizon=st.select_slider("Prognosezeitraum",options=[48,96,144,192,240,288,336,384] if model=="GEFS" else [48,96,144,192,240,288,336,360] if run.hour in (0,12) else [48,96,144],value=96,key="ens_horizon")
     interval=12 if horizon<=144 else 24
     steps=list(range(0,horizon+1,interval))
