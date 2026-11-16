@@ -24,7 +24,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "z500-mslp-v1"
+MAP_STYLE_VERSION = "z500-552-d2-v1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -71,6 +71,30 @@ def discover(run, variable):
         if variable in ("t","fi") and ("pressure-level" not in lower or not re.search(r"(?:^|_)"+("850" if variable=="t" else "500")+r"(?:_|\.)",lower)):
             continue
         match=re.search("_"+stamp+r"_(\d{3})(?:_|\.)",lower)
+        if match:
+            result[int(match.group(1))]=urljoin(folder,name)
+    return result
+
+
+D2_BASE="https://opendata.dwd.de/weather/nwp/icon-d2/grib"
+
+@st.cache_data(ttl=600,show_spinner=False)
+def discover_d2(run,variable):
+    folder=f"{D2_BASE}/{run:%H}/{variable}/"
+    response=requests.get(folder,headers=HEADERS,timeout=25)
+    response.raise_for_status()
+    parser=Links()
+    parser.feed(response.text)
+    result={}
+    stamp=run.strftime("%Y%m%d%H")
+    for name in parser.names:
+        lower=name.lower()
+        if not lower.endswith(".grib2.bz2") or stamp not in lower or variable not in lower:
+            continue
+        if variable in ("t","fi"):
+            if "pressure-level" not in lower or not re.search(r"(?:^|_)"+("850" if variable=="t" else "500")+r"(?:_|\\.)",lower):
+                continue
+        match=re.search("_"+stamp+r"_(\\d{3})(?:_|\\.)",lower)
         if match:
             result[int(match.group(1))]=urljoin(folder,name)
     return result
@@ -273,6 +297,10 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             raise RuntimeError("MSLP-Werte für Isobaren ungültig.")
         lines=ax.contour(X,Y,mslp,levels=np.arange(940,1081,4),colors="#19243A",linewidths=.85,alpha=.9)
         ax.clabel(lines,inline=True,fontsize=6,fmt="%d")
+        # Standard 552-gpdam contour (500-hPa geopotential), not a sea-level isobar.
+        if float(np.nanmin(Z)) <= 552 <= float(np.nanmax(Z)):
+            ridge=ax.contour(X,Y,Z,levels=[552],colors="#05070B",linewidths=1.8,zorder=6)
+            ax.clabel(ridge,inline=True,fontsize=8,fmt={552:"552"},colors="#05070B")
         label="Geopotenzielle Höhe 500 hPa (gpdam) · Isobaren MSLP (hPa)"
     elif parameter=="MSLP":
         from matplotlib.colors import LinearSegmentedColormap, Normalize
@@ -419,17 +447,17 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
 
 def show(region):
     st.subheader(f"Wettermodelle · {region}")
-    model=st.segmented_control("Wettermodell",["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
-    st.caption("ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
+    model=st.segmented_control("Wettermodell",["ICON-EU","ICON-D2","GFS"] if region=="Deutschland" else ["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
+    st.caption("ICON-D2: Deutschland bis +48 h stündlich (sofern die DWD-Dateien verfügbar sind). ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
-    choices=(["MSLP","T850","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model=="ICON-EU" else (["MSLP","T850","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","Z500 + MSLP"])
+    choices=(["MSLP","T850","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","Z500 + MSLP"])
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
     now_preview=datetime.now(timezone.utc)
     preview_run=now_preview.replace(minute=0,second=0,microsecond=0)
     preview_run=preview_run.replace(hour=(preview_run.hour//6)*6)
     lead=st.select_slider(
         "Vorhersagestunde · Datum und Uhrzeit (MEZ/MESZ)",
-        options=EU_LEADS if model=="ICON-EU" else list(range(0,385,3)),value=6,
+        options=(list(range(49)) if model=="ICON-D2" else EU_LEADS) if model!="GFS" else list(range(0,385,3)),value=6,
         format_func=lambda h:f"+{h} h · {(preview_run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="eu_lead_"+model,
     )
@@ -442,20 +470,20 @@ def show(region):
                 for offset in range(0,34,3):
                     run=(now-timedelta(hours=offset)).replace(minute=0,second=0,microsecond=0)
                     run=run.replace(hour=(run.hour//3)*3)
-                    if run not in runs and (model=="GFS" or lead<=78 or run.hour in (0,6,12,18)) and (model!="GFS" or run.hour in (0,6,12,18)):
+                    if run not in runs and (model=="GFS" or model=="ICON-D2" or lead<=78 or run.hour in (0,6,12,18)) and (model!="GFS" or run.hour in (0,6,12,18)):
                         runs.append(run)
                 variable="pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else ("fi" if parameter=="Z500 + MSLP" else SURFACE_FIELDS[parameter]))
                 selected=None
                 for run in runs:
                     try:
-                        available=discover(run,variable) if model=="ICON-EU" else discover_gfs(run,parameter,REGIONS[region])
+                        available=(discover_d2(run,variable) if model=="ICON-D2" else discover(run,variable)) if model!="GFS" else discover_gfs(run,parameter,REGIONS[region])
                     except requests.RequestException:
                         continue
                     previous_lead=previous_eu_lead(lead)
                     required=[previous_lead,lead] if parameter=="Niederschlagsrate" and previous_lead is not None else [lead]
                     if all(hour in available for hour in required):
-                        if parameter=="Z500 + MSLP" and model=="ICON-EU":
-                            try: pressure_files=discover(run,"pmsl")
+                        if parameter=="Z500 + MSLP" and model!="GFS":
+                            try: pressure_files=discover_d2(run,"pmsl") if model=="ICON-D2" else discover(run,"pmsl")
                             except requests.RequestException: continue
                             if lead not in pressure_files: continue
                         if model=="GFS":
@@ -471,7 +499,7 @@ def show(region):
                     raise RuntimeError(f"Keine passende {model}-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
                 run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
-                X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model=="ICON-EU" else load_gfs(url,valid,REGIONS[region],parameter)
+                X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model!="GFS" else load_gfs(url,valid,REGIONS[region],parameter)
                 if parameter=="Niederschlagsrate":
                     if lead==0:
                         Z=np.zeros_like(Z)
@@ -490,8 +518,8 @@ def show(region):
                     st.info(f"Niederschlagsrate: Mittelwert über die letzten {lead-previous_lead} Stunden (mm/h), nicht einstündiger Niederschlag.")
                 mslp=None
                 if parameter=="Z500 + MSLP":
-                    if model=="ICON-EU":
-                        pressure_files=discover(run,"pmsl")
+                    if model!="GFS":
+                        pressure_files=discover_d2(run,"pmsl") if model=="ICON-D2" else discover(run,"pmsl")
                         _,_,mslp=load_grid(pressure_files[lead],valid,REGIONS[region],"pmsl")
                     else:
                         pressure_urls=discover_gfs(run,"MSLP",REGIONS[region])
