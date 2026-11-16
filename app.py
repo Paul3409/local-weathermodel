@@ -57,9 +57,9 @@ def find_runs():
     return candidates
 
 
-def list_run(run):
+def list_run(run, parameter="t_2m"):
     """Read DWD directory index and find T_2M GRIB files without assuming suffix layout."""
-    folder = f'{BASE}/{run:%H}/t_2m/'
+    folder = f'{BASE}/{run:%H}/{parameter}/'
     html = fetch(folder).decode('utf-8', 'replace')
     from html.parser import HTMLParser
 
@@ -79,7 +79,7 @@ def list_run(run):
     matching = []
     for name in filenames:
         lower = name.lower()
-        if not (lower.endswith('.grib2.bz2') and 't_2m' in lower and expected_stamp in lower):
+        if not (lower.endswith('.grib2.bz2') and parameter in lower and expected_stamp in lower):
             continue
         matching.append(name)
         # DWD naming includes a 3-digit forecast hour immediately after run timestamp.
@@ -90,7 +90,7 @@ def list_run(run):
     return files, filenames[:8], matching[:8]
 
 
-def decode_grib(url):
+def decode_grib(url, parameter='t_2m'):
     raw = fetch(url, timeout=65)
     if url.endswith('.bz2'):
         raw = bz2.decompress(raw)
@@ -110,7 +110,8 @@ def decode_grib(url):
                 try:
                     lats = np.asarray(codes_get_array(gid, 'latitudes'), dtype=float)
                     lons = np.asarray(codes_get_array(gid, 'longitudes'), dtype=float)
-                    vals = np.asarray(codes_get_array(gid, 'values'), dtype=float) - 273.15
+                    vals = np.asarray(codes_get_array(gid, 'values'), dtype=float)
+                    vals = vals - 273.15 if parameter == 't_2m' else vals * 3.6
                     valid_date = int(codes_get(gid, 'validityDate'))
                     valid_time = int(codes_get(gid, 'validityTime'))
                     valid = datetime.strptime(f'{valid_date:08d}{valid_time:04d}', '%Y%m%d%H%M').replace(tzinfo=timezone.utc)
@@ -384,11 +385,58 @@ def render_difference(X, Y, difference, run, valid):
     return out.getvalue()
 
 
+GUST_STOPS = [(0,'#499FE1'),(10,'#204D99'),(20,'#347B4A'),(30,'#A3BE4B'),(40,'#E8D24A'),(50,'#F3A143'),(60,'#E96A38'),(70,'#DB3834'),(80,'#B9252E'),(90,'#811A2C'),(100,'#48205F'),(110,'#853AA8'),(120,'#C52D9A')]
+GUST_CMAP = LinearSegmentedColormap.from_list('elbtal_gust', [(v/120,col) for v,col in GUST_STOPS], N=2048)
+GUST_CMAP.set_under('#499FE1')
+GUST_CMAP.set_over('#C52D9A')
+GUST_NORM = Normalize(0,120)
+
+
+def render_gust(X,Y,Z,run,valid,show_km_values=False):
+    fig,ax = plt.subplots(figsize=(9,9.3),dpi=150)
+    fig.patch.set_facecolor('#f6f8fa')
+    filled = ax.contourf(X,Y,Z,levels=np.arange(0,120.01,1),cmap=GUST_CMAP,norm=GUST_NORM,extend='max')
+    lo,hi = float(np.nanmin(Z)),float(np.nanmax(Z))
+    contours = np.arange(max(0,np.ceil(lo/10)*10),min(120,np.floor(hi/10)*10)+.01,10)
+    if len(contours):
+        ax.contour(X,Y,Z,levels=contours,colors='#263345',linewidths=.6,alpha=.8)
+    if show_km_values:
+        draw_km_temperatures(ax,X,Y,Z)
+    for name,(lat,lon) in PLACES.items():
+        if LAT_MIN<=lat<=LAT_MAX and LON_MIN<=lon<=LON_MAX:
+            ax.plot(lon,lat,'o',color='#101828',markersize=2.5,zorder=12)
+            ax.annotate(name,(lon,lat),xytext=(4,4),textcoords='offset points',
+                        fontsize=8,weight='bold',color='#15263a',zorder=13,
+                        bbox=dict(facecolor='white',alpha=.88,edgecolor='none',pad=1))
+    ax.set_xlim(LON_MIN,LON_MAX)
+    ax.set_ylim(LAT_MIN,LAT_MAX)
+    ax.set_aspect(1/np.cos(np.deg2rad((LAT_MIN+LAT_MAX)/2)))
+    ax.set_xlabel('Längengrad (°O)')
+    ax.set_ylabel('Breitengrad (°N)')
+    ax.grid(color='white',alpha=.25,linewidth=.5)
+    fig.suptitle('ELBTAL  |  Windböen',fontsize=16,weight='bold',y=.98)
+    ax.set_title(f'ICON-D2 Windböen · Lauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=8,pad=12)
+    cb=fig.colorbar(filled,ax=ax,orientation='horizontal',fraction=.055,pad=.09)
+    cb.set_ticks(np.arange(0,121,10))
+    cb.ax.tick_params(labelsize=7)
+    cb.set_label('Windböen (km/h) · feste Farbskala')
+    fig.text(.5,.025,'DWD ICON-D2 · interpolierte Windböen, keine lokale Geländekorrektur',
+             ha='center',fontsize=8,color='#48566a')
+    out=io.BytesIO()
+    fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
+    plt.close(fig)
+    return out.getvalue()
+
+
 st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title('🌡️ ELBTAL-T2M · v0.5.5')
-st.caption('Statische DWD-ICON-D2-Temperaturkarten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
-st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte WorldCover-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
-with st.expander('Landnutzung einmalig vorbereiten', expanded=not LANDUSE_FILE.exists()):
+st.title('🌡️ ELBTAL · v0.6.0')
+st.caption('ICON-D2-Karten für Belgern, Mühlberg, Nünchritz, Glaubitz und Zeithain')
+parameter_page = st.segmented_control('Parameter wählen', options=['🌡️ Temperatur','🌬️ Windböen'], default='🌡️ Temperatur', selection_mode='single')
+is_gust = parameter_page == '🌬️ Windböen'
+st.subheader('🌬️ Windböen (km/h)' if is_gust else '🌡️ 2-m-Temperatur (°C)')
+if not is_gust:
+    st.info('Experimentelles Downscaling: Höhenkorrektur und optionale gespeicherte WorldCover-Landnutzung. Die Koeffizienten sind heuristisch und nicht validiert.')
+with st.expander('Landnutzung einmalig vorbereiten', expanded=False):
     st.write('Einmalige ESA-WorldCover-Abfrage; anschließend die erzeugte NPZ-Datei unter `data/landuse.npz` in GitHub hochladen. Bei regulären Prognosen wird kein Landnutzungsserver aufgerufen.')
     if st.button('ESA-WorldCover-Raster einmalig abrufen'):
         try:
@@ -401,11 +449,15 @@ with st.expander('Landnutzung einmalig vorbereiten', expanded=not LANDUSE_FILE.e
     if 'prepared_landuse' in st.session_state:
         st.download_button('landuse.npz herunterladen', data=st.session_state['prepared_landuse'],
                            file_name='landuse.npz', mime='application/octet-stream')
-if LANDUSE_FILE.exists():
-    st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
+if not is_gust:
+    if LANDUSE_FILE.exists():
+        st.success('Gespeichertes Landnutzungsraster gefunden: data/landuse.npz')
+    else:
+        st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
+    enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
 else:
-    st.warning('Noch keine gespeicherte Landnutzungsdatei. Prognosen funktionieren vorerst nur mit Höhenkorrektur.')
-enable_landuse = st.checkbox('Gespeicherte Landnutzung verwenden (experimentell)', value=True)
+    enable_landuse = False
+    st.caption('DWD-ICON-D2-Windböen ohne experimentelle Temperaturkorrekturen.')
 start_hour, end_hour = st.select_slider('Prognosezeitraum auswählen (+0 bis +12 h)', options=list(range(13)), value=(0, 6), format_func=lambda h: f'+{h} h')
 st.caption(f'Es werden nur die Stunden +{start_hour} bis +{end_hour} (einschließlich) heruntergeladen und gezeichnet.')
 if st.button('DWD-Prognose manuell berechnen', type='primary'):
@@ -415,7 +467,7 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             diagnostics = []
             for run in find_runs():
                 try:
-                    files, examples, matching = list_run(run)
+                    files, examples, matching = list_run(run, 'vmax_10m' if is_gust else 't_2m')
                     requested = list(range(start_hour, end_hour + 1))
                     available = [h for h in requested if h in files]
                     diagnostics.append(f'{run:%Y-%m-%d %H} UTC: {len(files)} Dateien; Stunden {available}; Beispiele: {matching or examples}')
@@ -433,10 +485,13 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
             images = []
             terrain = None
             try:
+                if is_gust:
+                    raise ValueError('Für Böen nicht benötigt')
                 terrain = get_terrain()
                 st.write(f'Geländedaten geladen: {terrain.min():.0f} bis {terrain.max():.0f} m')
             except Exception as terrain_error:
-                st.warning(f'Geländedaten nicht verfügbar: {terrain_error}. Es werden nur ICON-D2-Karten erstellt.')
+                if not is_gust:
+                    st.warning(f'Geländedaten nicht verfügbar: {terrain_error}. Es werden nur ICON-D2-Karten erstellt.')
             landuse = None
             if enable_landuse and terrain is not None:
                 try:
@@ -446,12 +501,12 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                     st.warning(f'Gespeicherte Landnutzung nicht verfügbar: {land_error}. Höhenkorrektur bleibt aktiv.')
             for idx, hour in enumerate(hours):
                 st.write(f'Lade und zeichne +{hour} h ({idx+1}/{len(hours)}) …')
-                messages = decode_grib(files[hour])
+                messages = decode_grib(files[hour], 'vmax_10m' if is_gust else 't_2m')
                 # Hourly files can contain multiple 15-minute messages: choose exact valid time.
                 target = run + timedelta(hours=hour)
                 msg = min(messages, key=lambda m: abs((m[3]-target).total_seconds()))
                 X, Y, Z = interpolate(*msg[:3])
-                original_png = (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True))
+                original_png = (render_gust(X,Y,Z,run,msg[3]), render_gust(X,Y,Z,run,msg[3],show_km_values=True)) if is_gust else (render_png(X,Y,Z,run,msg[3]), render_png(X,Y,Z,run,msg[3],show_km_values=True))
                 local_png = None
                 combined_png = None
                 diff_png = None
@@ -464,29 +519,30 @@ if st.button('DWD-Prognose manuell berechnen', type='primary'):
                         combined_png = tuple(render_png(X,Y,combined,run,msg[3],mode='Höhe + WorldCover-Landnutzung · experimentell',correction=combined-Z,show_km_values=flag) for flag in (False,True))
                         diff_png = render_difference(X, Y, combined-Z, run, msg[3])
                 images.append((hour, msg[3], original_png, local_png, combined_png, diff_png))
-            st.session_state['images'] = images
+            st.session_state['images_gust' if is_gust else 'images_temp'] = images
             status.update(label='Temperaturkarten erstellt', state='complete')
         except Exception as exc:
             status.update(label='Abruf oder Verarbeitung fehlgeschlagen', state='error')
             st.error(f'{type(exc).__name__}: {exc}')
 
-if 'images' in st.session_state:
-    images = st.session_state['images']
+image_key = 'images_gust' if is_gust else 'images_temp'
+if image_key in st.session_state:
+    images = st.session_state[image_key]
     labels = [f'+{item[0]} h · {item[1].astimezone(TZ):%d.%m.%Y %H:%M %Z}' for item in images]
     choice = st.select_slider('Vorhersagekarte', options=range(len(images)),
-                              format_func=lambda i: labels[i])
+                              format_func=lambda i: labels[i], key='hour_gust' if is_gust else 'hour_temp')
     st.caption(f'Ausgewählt: {labels[choice]}')
     h, valid, original_png, local_png, combined_png, diff_png = images[choice]
-    variants = {'ICON-D2 (interpoliert)': original_png}
-    if local_png is not None:
+    variants = {'ICON-D2 Windböen': original_png} if is_gust else {'ICON-D2 (interpoliert)': original_png}
+    if local_png is not None and not is_gust:
         variants['Höhenkorrektur'] = local_png
-    if combined_png is not None:
+    if combined_png is not None and not is_gust:
         variants['Höhe + Landnutzung'] = combined_png
         variants['Differenz zu ICON-D2'] = diff_png
-    variant = st.radio('Kartentyp', list(variants), horizontal=True)
-    show_km_values = st.checkbox('Temperaturzahlen alle ca. 1 km anzeigen', value=False, help='Interpolierte Modelltemperaturen am jeweiligen Punkt, keine Messwerte.')
+    variant = st.radio('Kartentyp', list(variants), horizontal=True, key='variant_gust' if is_gust else 'variant_temp')
+    show_km_values = st.checkbox('Werte alle ca. 1 km anzeigen', value=False, key='values_gust' if is_gust else 'values_temp', help='Interpolierte Modellwerte am jeweiligen Punkt, keine Messwerte.')
     selected_map = variants[variant]
     png = selected_map if variant == 'Differenz zu ICON-D2' else selected_map[int(show_km_values)]
     st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
-                       file_name=f'ELBTAL_T2M_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
+                       file_name=f'ELBTAL_{"BOEEN" if is_gust else "T2M"}_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
