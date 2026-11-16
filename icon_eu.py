@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
@@ -21,7 +22,15 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Europa": (-12.0, 35.0, 34.0, 72.0)}
 HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "germany-dewpoint-phase-v1"
+MAP_STYLE_VERSION = "forecast-120h-local-time-v1"
+LOCAL_TZ=ZoneInfo("Europe/Berlin")
+EU_LEADS=list(range(79))+list(range(81,121,3))
+def previous_eu_lead(lead):
+    if lead==0:
+        return None
+    if lead<=78:
+        return lead-1
+    return lead-3
 SURFACE_FIELDS = {"2-m-Temperatur":"t_2m","Windböen":"vmax_10m","Niederschlagsrate":"tot_prec","Niederschlagssumme":"tot_prec","Taupunkt":"td_2m","Niederschlagsart":"tot_prec"}
 PHASE_COMPONENTS=("rain_gsp","rain_con","snow_gsp","snow_con")
 PHASE_COLORS=["#F2F5F7","#278DCE","#F39A43","#F4A4CF","#8C949F"]
@@ -295,11 +304,20 @@ def render(X,Y,Z,region,parameter,run,valid):
 
 def show(region):
     st.subheader(f"ICON-EU · {region}")
-    st.caption("Stündliche Original-Modellzeitpunkte; Landesgrenzen und bei Deutschland Bundesländergrenzen. Keine künstliche zeitliche Verfeinerung.")
+    st.caption("ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden (abhängig vom verfügbaren Modelllauf). Landes- und Bundesländergrenzen bleiben erhalten.")
     st.caption("Niederschlagsart: experimentelle Ableitung aus stündlichen Regen-/Schnee-Akkumulationen; keine Erkennung von gefrierendem Regen. Unklare Mischformen werden grau dargestellt.")
     choices=["MSLP","T850"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])
     parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter")
-    lead=st.select_slider("Vorhersagestunde",options=list(range(25)),value=6,format_func=lambda h:f"+{h} h",key="eu_lead")
+    now_preview=datetime.now(timezone.utc)
+    preview_run=now_preview.replace(minute=0,second=0,microsecond=0)
+    preview_run=preview_run.replace(hour=(preview_run.hour//6)*6)
+    lead=st.select_slider(
+        "Vorhersagestunde · Datum und Uhrzeit (MEZ/MESZ)",
+        options=EU_LEADS,value=6,
+        format_func=lambda h:f"+{h} h · {(preview_run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
+        key="eu_lead",
+    )
+    st.caption("Zeitangabe vorläufig für den jüngsten 6-stündlichen Hauptlauf; nach dem Abruf zählt die Gültigkeitszeit der tatsächlich verwendeten Datei.")
     if st.button("ICON-EU-Karte manuell berechnen",type="primary"):
         with st.status("ICON-EU-Datei und Grenzen laden …",expanded=True) as status:
             try:
@@ -308,7 +326,7 @@ def show(region):
                 for offset in range(0,34,3):
                     run=(now-timedelta(hours=offset)).replace(minute=0,second=0,microsecond=0)
                     run=run.replace(hour=(run.hour//3)*3)
-                    if run not in runs:
+                    if run not in runs and (lead<=78 or run.hour in (0,6,12,18)):
                         runs.append(run)
                 variable="pmsl" if parameter=="MSLP" else ("t" if parameter=="T850" else SURFACE_FIELDS[parameter])
                 selected=None
@@ -317,7 +335,8 @@ def show(region):
                         available=discover(run,variable)
                     except requests.RequestException:
                         continue
-                    required=[lead-1,lead] if parameter in ("Niederschlagsrate","Niederschlagsart") and lead>0 else [lead]
+                    previous_lead=previous_eu_lead(lead)
+                    required=[previous_lead,lead] if parameter in ("Niederschlagsrate","Niederschlagsart") and previous_lead is not None else [lead]
                     if all(hour in available for hour in required):
                         components={}
                         if parameter=="Niederschlagsart":
@@ -329,7 +348,7 @@ def show(region):
                                     components[name]=component_files
                             except (requests.RequestException,ValueError):
                                 continue
-                        selected=(run,available[lead],available.get(lead-1),components)
+                        selected=(run,available[lead],available.get(previous_lead),components)
                         break
                 if selected is None:
                     raise RuntimeError(f"Keine passende ICON-EU-Datei für {parameter} +{lead} h gefunden. Bei T850 wird ausdrücklich eine 850-hPa-Druckflächen-Datei benötigt.")
@@ -340,8 +359,9 @@ def show(region):
                     if lead==0:
                         Z=np.zeros_like(Z)
                     else:
-                        _,_,prior=load_grid(previous_url,valid-timedelta(hours=1),REGIONS[region],variable)
-                        diff=Z-prior
+                        interval=lead-previous_lead
+                        _,_,prior=load_grid(previous_url,run+timedelta(hours=previous_lead),REGIONS[region],variable)
+                        diff=(Z-prior)/interval
                         if np.nanmin(diff)<-.1:
                             raise RuntimeError("Niederschlagsakkumulation fällt ab. Keine Rate berechnet.")
                         Z=np.maximum(diff,0)
@@ -351,14 +371,14 @@ def show(region):
                     if lead==0:
                         Z=np.zeros_like(Z)
                     else:
-                        _,_,previous_total=load_grid(previous_url,valid-timedelta(hours=1),REGIONS[region],"tot_prec")
+                        _,_,previous_total=load_grid(previous_url,run+timedelta(hours=previous_lead),REGIONS[region],"tot_prec")
                         total_delta=Z-previous_total
                         if np.nanmin(total_delta)<-.1:
                             raise RuntimeError("Niederschlagsakkumulation fällt ab; Art nicht bestimmbar.")
                         increments={}
                         for name,files in components.items():
                             _,_,current=load_grid(files[lead],valid,REGIONS[region],name)
-                            _,_,previous=load_grid(files[lead-1],valid-timedelta(hours=1),REGIONS[region],name)
+                            _,_,previous=load_grid(files[previous_lead],run+timedelta(hours=previous_lead),REGIONS[region],name)
                             delta=current-previous
                             if np.nanmin(delta)<-.1:
                                 raise RuntimeError(f"Akkumulation {name} fällt ab; Art nicht bestimmbar.")
@@ -374,8 +394,13 @@ def show(region):
                         classified[wet & sufficient & (snow>=3*np.maximum(rain,.001))]=3
                         classified[wet & sufficient & (rain<3*np.maximum(snow,.001)) & (snow<3*np.maximum(rain,.001))]=2
                         Z=classified
+                if parameter=="Niederschlagsrate" and lead>78:
+                    st.info(f"Niederschlagsrate: Mittelwert über die letzten {lead-previous_lead} Stunden (mm/h), nicht einstündiger Niederschlag.")
+                if parameter=="Niederschlagsart" and lead>78:
+                    st.info(f"Niederschlagsart: Ableitung aus den letzten {lead-previous_lead} Stunden, keine stündliche Diagnose.")
                 png=render(X,Y,Z,region,parameter,run,valid)
                 st.session_state["eu_map"]=(MAP_STYLE_VERSION,region,parameter,lead,valid,png)
+                st.caption(f"Verwendeter Modelllauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
                 status.update(label="ICON-EU-Karte erstellt",state="complete")
             except Exception as exc:
                 status.update(label="ICON-EU-Verarbeitung fehlgeschlagen",state="error")
@@ -387,5 +412,6 @@ def show(region):
         result=None
     if result and len(result)==6 and result[:4]==(MAP_STYLE_VERSION,region,parameter,lead):
         _,_,_,_,valid,png=result
+        st.caption(f"Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z} · Modellzeitpunkt UTC: {valid:%d.%m.%Y %H:%M}")
         st.image(png,width="stretch")
         st.download_button("PNG herunterladen",png,file_name=f"ELBTAL_ICON-EU_{region}_{parameter}_{valid:%Y%m%d_%H%M}.png",mime="image/png")
