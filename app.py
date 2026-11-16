@@ -941,3 +941,38 @@ if krumet_mode and st.session_state.get('krumet_station_samples'):
                     st.info('Für diese Prognosezeiten liegen noch keine DWD-Stundenmesswerte vor. Später erneut versuchen.')
             except (requests.RequestException,ValueError,KeyError,IndexError) as exc:
                 st.warning(f'DWD-Stationsvergleich derzeit nicht verfügbar: {type(exc).__name__}: {exc}')
+
+
+if krumet_mode:
+    with st.expander('🌙 Historische Nächte | DWD-Messwerte', expanded=True):
+        st.caption('Untersuche abgeschlossene Nächte (18–09 Uhr Ortszeit). Das sind echte Messwerte, noch kein historischer ICON-D2/KRUMET-Prognosevergleich.')
+        try:
+            import pandas as pd
+            station_list = dwd_stations()
+            if not station_list:
+                st.warning('Keine DWD-Stationen im KRUMET-Gebiet gefunden. Bitte Stationsmetadaten prüfen.')
+            else:
+                station_options = {f'{name} ({sid})':sid for sid,name,lat,lon,elev in station_list}
+                station_label = st.selectbox('Messstation für Nachtanalyse',list(station_options),key='krumet_night_station')
+                yesterday = (datetime.now(TZ)-timedelta(days=1)).date()
+                night_date = st.date_input('Nacht beginnt am',value=yesterday,max_value=yesterday,key='krumet_night_date')
+                if st.button('Abgeschlossene Nacht auswerten',key='krumet_night_go'):
+                    measurements = dwd_hourly_temperature(station_options[station_label]).copy()
+                    start_local = datetime.combine(night_date,datetime.min.time(),tzinfo=TZ).replace(hour=18)
+                    end_local = start_local + timedelta(hours=15)
+                    start_utc = pd.Timestamp(start_local.astimezone(timezone.utc))
+                    end_utc = pd.Timestamp(end_local.astimezone(timezone.utc))
+                    night = measurements[(measurements['time']>=start_utc)&(measurements['time']<=end_utc)].copy()
+                    if night.empty:
+                        st.info('Für diese Nacht liegen in der aktuellen DWD-Datei keine Stundenwerte vor. Bitte eine jüngere Nacht wählen.')
+                    else:
+                        night['Ortszeit'] = night['time'].dt.tz_convert('Europe/Berlin')
+                        night = night.sort_values('time')
+                        st.line_chart(night.set_index('Ortszeit')['temperature'],y_label='Temperatur (°C)')
+                        minimum = night.loc[night['temperature'].idxmin()]
+                        st.metric('Tiefste gemessene Stundentemperatur',f"{minimum['temperature']:.1f} °C")
+                        st.caption(f"Minimum um {minimum['Ortszeit']:%d.%m.%Y %H:%M} Ortszeit · {len(night)} Stundenmessungen vorhanden")
+                        st.dataframe(night[['Ortszeit','temperature']].rename(columns={'temperature':'DWD 2-m-Temperatur (°C)'}),hide_index=True)
+                        st.info('Für einen fairen Modellvergleich müssen archivierte Prognosen mit identischem Gültigkeitszeitpunkt und dokumentiertem Modelllauf hinzukommen.')
+        except (requests.RequestException,ValueError,KeyError,FileNotFoundError) as exc:
+            st.warning(f'Historische DWD-Messwerte derzeit nicht verfügbar: {type(exc).__name__}: {exc}')
