@@ -11,7 +11,7 @@ from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_
 from scipy.interpolate import griddata
 from icon_eu import REGIONS, LOCAL_TZ, render
 
-PARAMS={"MSLP":"msl","T850":"t","Z500 + MSLP":"z"}
+PARAMS={"MSLP":"msl","T850":"t","T850 + MSLP":"t","Z500 + MSLP":"z"}
 HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.0 (educational)"}
 
 def cycles():
@@ -107,6 +107,43 @@ def get_field(model,run,lead,parameter,bounds):
     raw=ecmwf_bytes(run,lead,parameter) if model=="ECMWF IFS" else gefs_bytes(run,lead,parameter,bounds)
     return decode(raw,run+timedelta(hours=lead),bounds,parameter)
 
+@st.cache_data(ttl=7*86400,show_spinner=False)
+def monthly_pressure_climatology(month):
+    """NOAA PSL NCEP/NCAR Reanalysis 1, monthly MSLP normals 1991-2020 (hPa)."""
+    import h5py
+    urls=[
+        "https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/surface/slp.mon.ltm.1991-2020.nc",
+        "https://psl.noaa.gov/thredds/fileServer/Datasets/ncep.reanalysis/Monthlies/surface/slp.mon.ltm.1991-2020.nc",
+    ]
+    failures=[]
+    for url in urls:
+        try:
+            response=requests.get(url,headers=HEADERS,timeout=45)
+            response.raise_for_status()
+            with h5py.File(io.BytesIO(response.content),"r") as nc:
+                lat=np.asarray(nc["lat"][:],dtype=float)
+                lon=np.asarray(nc["lon"][:],dtype=float)
+                values=np.asarray(nc["slp"][month-1],dtype=float)
+                scale=float(nc["slp"].attrs.get("scale_factor",1))
+                offset=float(nc["slp"].attrs.get("add_offset",0))
+                values=values*scale+offset
+            if values.shape!=(len(lat),len(lon)) or not 950<float(np.nanmedian(values))<1060:
+                raise ValueError("Ungültige MSLP-Klimatologie.")
+            return lat,lon,values
+        except (requests.RequestException,OSError,KeyError,ValueError) as exc:
+            failures.append(f"{type(exc).__name__}: {exc}")
+    raise RuntimeError("NOAA-Klimatologie nicht erreichbar: "+"; ".join(failures))
+
+def climatology_on_grid(X,Y,month):
+    from scipy.interpolate import RegularGridInterpolator
+    lat,lon,values=monthly_pressure_climatology(month)
+    il=np.argsort(lat);jl=np.argsort(lon)
+    interpolator=RegularGridInterpolator((lat[il],lon[jl]),values[np.ix_(il,jl)],bounds_error=False,fill_value=np.nan)
+    result=interpolator(np.column_stack((Y.ravel(),np.mod(X.ravel(),360)))).reshape(X.shape)
+    if not np.isfinite(result).all():
+        raise RuntimeError("Klimatologie deckt das Kartengebiet nicht vollständig ab.")
+    return result
+
 def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     import matplotlib.pyplot as plt
     from matplotlib.colors import TwoSlopeNorm
@@ -150,34 +187,20 @@ def show(region):
     lead=st.select_slider("Prognosestunde",options=options,value=options[min(2,len(options)-1)],
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="global_lead_"+model)
-    parameter=st.radio("Parameter",["MSLP","T850","Z500 + MSLP","MSLP-Anomalie"],horizontal=True,key="global_parameter_"+model)
-    ref=None
+    parameter=st.radio("Parameter",["MSLP","T850","T850 + MSLP","Z500 + MSLP","MSLP-Anomalie"],horizontal=True,key="global_parameter_"+model)
     if parameter=="MSLP-Anomalie":
-        st.info("Für eine echte Anomalie ist eine externe Druck-Klimatologie erforderlich. Keine Abweichung von einem erfundenen Standardwert.")
-        upload=st.file_uploader("Referenz-Klimatologie (NPZ mit lat, lon und msl_hpa; passender Kalendermonat)",type=["npz"],key="global_climate")
-        if upload is not None:
-            with np.load(io.BytesIO(upload.getvalue())) as data:
-                ref={k:data[k].copy() for k in ("lat","lon","msl_hpa")}
+        st.caption("Referenz: NOAA PSL NCEP/NCAR Reanalysis 1, Monatsmittel 1991–2020 (2,5°). Automatischer Download; Monatsklimatologie, kein tagesgenauer ERA5-Vergleich.")
     if st.button("Globale Karte berechnen",type="primary",key="global_generate"):
         try:
             with st.spinner(f"{model} direkt herunterladen und berechnen …"):
                 valid=run+timedelta(hours=lead)
                 variable=PARAMS["MSLP" if parameter=="MSLP-Anomalie" else parameter]
                 X,Y,Z=get_field(model,run,lead,variable,REGIONS[region])
-                if parameter=="Z500 + MSLP":
+                if parameter in ("Z500 + MSLP","T850 + MSLP"):
                     _,_,mslp=get_field(model,run,lead,"msl",REGIONS[region])
                 else:mslp=None
                 if parameter=="MSLP-Anomalie":
-                    if ref is None:raise ValueError("Bitte zuerst eine passende MSLP-Klimatologie hochladen.")
-                    from scipy.interpolate import RegularGridInterpolator
-                    la=np.asarray(ref["lat"]);lo=np.asarray(ref["lon"]);cl=np.asarray(ref["msl_hpa"])
-                    if la.ndim!=1 or lo.ndim!=1 or cl.shape!=(len(la),len(lo)):
-                        raise ValueError("Klimatologie benötigt 1D lat/lon und msl_hpa mit Form (lat,lon).")
-                    il=np.argsort(la);jl=np.argsort(lo)
-                    interp=RegularGridInterpolator((la[il],lo[jl]),cl[np.ix_(il,jl)],bounds_error=False,fill_value=np.nan)
-                    baseline=interp(np.column_stack((Y.ravel(),X.ravel()))).reshape(X.shape)
-                    if not np.isfinite(baseline).all() or not 850<np.median(baseline)<1100:
-                        raise ValueError("Klimatologie deckt Kartengebiet nicht ab oder hat falsche Einheit.")
+                    baseline=climatology_on_grid(X,Y,valid.month)
                     png=anomaly_map(X,Y,Z,baseline,region,model,run,valid)
                 else:png=render(X,Y,Z,region,parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["global_map"]=(model,region,run,lead,parameter,valid,png)
