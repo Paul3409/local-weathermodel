@@ -243,7 +243,7 @@ def show():
     parameter=st.selectbox("Parameter",list(FIELDS),key="ens_param")
     run=st.selectbox("Vier letzte berechnete Modellzyklen (UTC)",runs(model),format_func=lambda x:x.strftime("%d.%m.%Y %H UTC"),key="ens_run")
     st.caption("UTC bezeichnet die Modellinitialisierung. Die neuesten Zyklen werden erst nach einer Bereitstellungsfrist angeboten; einzelne Prognosedaten können dennoch fehlen.")
-    horizon=st.select_slider("Prognosezeitraum",options=[48,96,144,192,240,288,336,384] if model=="GEFS" else [48,96,144,192,240,288,336,360] if run.hour in (0,12) else [48,96,144],value=96,key="ens_horizon")
+    horizon=st.select_slider("Prognosezeitraum",options=[48,96,144,192,240,288,336,384] if model=="GEFS" else [48,96,144,192,240,288,336,360] if run.hour in (0,12) else [48,96,144],value=384 if model=="GEFS" else 360,key="ens_horizon")
     # Every member and every parameter uses native 6-hourly forecast steps.
     # In particular, T2 must retain the diurnal temperature cycle.
     steps=list(range(0,horizon+1,6))
