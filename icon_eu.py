@@ -317,7 +317,7 @@ def show(region):
                         available=discover(run,variable)
                     except requests.RequestException:
                         continue
-                    required=[lead-1,lead] if parameter=="Niederschlagsrate" and lead>0 else [lead]
+                    required=[lead-1,lead] if parameter in ("Niederschlagsrate","Niederschlagsart") and lead>0 else [lead]
                     if all(hour in available for hour in required):
                         components={}
                         if parameter=="Niederschlagsart":
