@@ -200,7 +200,8 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     return frame_png(out.getvalue(),"MSLP-Anomalie",model,region,run,valid)
 
 def show(region, forced_model=None, forced_parameter=None):
-    st.subheader(f"Globale Modelle · {region}")
+    if forced_model is None:
+        st.subheader(f"Globale Modelle · {region}")
     model=forced_model or st.segmented_control("Modell",["ECMWF IFS","GEFS Mittel"],default="ECMWF IFS",key="global_model")
     st.caption("Direktdaten: ECMWF Open Data (IFS oper) / NOAA NOMADS (GEFS geavg). Kein Open-Meteo.")
     available=recent_cycles(model, count=9)
