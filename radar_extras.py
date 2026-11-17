@@ -37,15 +37,24 @@ CITIES = (
     ("Hannover", 9.732, 52.375), ("Nürnberg", 11.077, 49.454),
     ("Duisburg", 6.763, 51.434), ("Mühlberg/E.", 13.222, 51.434),
 )
-HYMEC_NAMES = (
-    "Kein Niederschlag", "Nicht klassifiziert", "Sprühregen", "Regen",
-    "Gefr. Sprühregen", "Gefrierender Regen", "Schneeregen", "Schnee",
-    "Graupel", "Hagel", "Großer Hagel",
-)
+# Display categories 0..13; HYMEC's original 0..10 remain the source classes.
 HYMEC_COLORS = (
-    "#10273e", "#777777", "#86b59a", "#29cd3a", "#e7b44a",
-    "#f44643", "#f8a04b", "#46d6e9", "#448bdf", "#c63ccf", "#9015a8",
+    "#10273e", "#777777", "#69E65B", "#169C32", "#FF8888",
+    "#EF202E", "#F8A04B", "#85E8FF", "#C63CCF", "#C63CCF",
+    "#74108F", "#075B25", "#258EEB", "#1646A8",
 )
+HYMEC_NAMES = (
+    "Kein Niederschlag", "Nicht klassifiziert", "Sprühregen",
+    "Regen", "Gefr. Sprühregen", "Gefrierender Regen", "Schneeregen",
+    "Schnee (leicht)", "Graupel", "Hagel", "Großer Hagel",
+    "Regen (stark)", "Schnee (mittel)", "Schnee (stark)",
+)
+# Empirical radar-reflectivity thresholds, not directly measured intensity.
+# They are intentionally conservative; radar beam altitude and bright band
+# can cause substantial departures from surface precipitation intensity.
+RAIN_STRONG_DBZ = 40.0
+SNOW_MEDIUM_DBZ = 20.0
+SNOW_STRONG_DBZ = 30.0
 SUM_EDGES = (0, .1, .5, 1, 2, 3, 5, 7, 10, 15, 20, 30, 40, 60, 80, 100, 150)
 SUM_COLORS = (
     "#29506d", "#247eab", "#2db0d4", "#57d9d8", "#3dc69c",
@@ -151,16 +160,49 @@ def accumulated_rw(hours, end_time):
     total[~valid] = np.nan
     return total, geometry
 
-def render_extra(data, geometry, product, stamp, cities=False, hours=None):
-    X, Y, rows, cols = radar.sample_geometry(*geometry, data.shape)
+def _sample_to_map(data, geometry):
+    """Nearest-neighbor sample on the fixed ELBTAL Germany map grid."""
+    _, _, rows, cols = radar.sample_geometry(*geometry, data.shape)
     valid = (rows >= 0) & (rows < data.shape[0]) & (cols >= 0) & (cols < data.shape[1])
     grid = map_coordinates(np.nan_to_num(data, nan=-9999), [rows, cols],
                            order=0, mode="constant", cval=-9999)
-    grid = np.where(valid & (grid >= 0), grid, np.nan)
+    return np.where(valid & (grid >= 0), grid, np.nan)
+
+
+def classify_precipitation(hymec_grid, reflectivity_grid):
+    """Combine HYMEC class and collocated WN dBZ, preserving other classes."""
+    result = np.array(hymec_grid, copy=True)
+    available = np.isfinite(reflectivity_grid)
+    result[(hymec_grid == 3) & available &
+           (reflectivity_grid >= RAIN_STRONG_DBZ)] = 11
+    snow = (hymec_grid == 7) & available
+    result[snow & (reflectivity_grid >= SNOW_MEDIUM_DBZ) &
+           (reflectivity_grid < SNOW_STRONG_DBZ)] = 12
+    result[snow & (reflectivity_grid >= SNOW_STRONG_DBZ)] = 13
+    return result
+
+
+def matching_wn_frame(stamp):
+    """Only merge radar products from nearly the same observation time."""
+    frames = radar.list_frames("WN")
+    if not frames:
+        return None
+    candidate = min(frames, key=lambda item: abs((item[0] - stamp).total_seconds()))
+    if abs((candidate[0] - stamp).total_seconds()) > 300:
+        return None
+    return candidate
+
+
+def render_extra(data, geometry, product, stamp, cities=False, hours=None,
+                 reflectivity=None, reflectivity_geometry=None):
+    grid = _sample_to_map(data, geometry)
     if product == "HYMEC":
-        levels = np.arange(-.5, 11.5, 1)
+        if reflectivity is not None and reflectivity_geometry is not None:
+            dbz_grid = _sample_to_map(reflectivity, reflectivity_geometry)
+            grid = classify_precipitation(grid, dbz_grid)
+        levels = np.arange(-.5, 14.5, 1)
         colors = HYMEC_COLORS
-        ticks = np.arange(11)
+        ticks = np.arange(14)
         legend_title = "Niederschlagsart"
         title = "Live-Wetteranalyse"
     elif product == "RW":
@@ -255,7 +297,7 @@ def show():
         stamp, url = frames[idx]
         st.caption(f"Messzeit: {stamp.astimezone(radar.TZ):%d.%m.%Y %H:%M %Z} "
                    f"· UTC {stamp:%H:%M}")
-    cache_key = (product, url, hours, cities)
+    cache_key = (product, url, hours, cities, "intensity-v1")
     if st.button("📡 Radaraufnahme laden", type="primary"):
         try:
             with st.spinner("Originale DWD-Radardaten laden …"):
@@ -265,7 +307,22 @@ def show():
                     field, geo = read_extra_frame(url, product)
                 else:
                     field, geo = radar.load_frame(url, product)
-                png = render_extra(field, geo, product, stamp, cities=cities, hours=hours)
+                reflectivity = None
+                reflectivity_geometry = None
+                if product == "HYMEC":
+                    try:
+                        match = matching_wn_frame(stamp)
+                        if match is not None:
+                            reflectivity, reflectivity_geometry = radar.load_frame(match[1], "WN")
+                        else:
+                            st.info("Keine zeitgleiche WN-Reflektivität verfügbar: "
+                                    "Darstellung der originalen HYMEC-Klassen ohne Intensitätsstufen.")
+                    except (requests.RequestException, OSError, ValueError, RuntimeError) as exc:
+                        st.info("WN-Reflektivität nicht verfügbar; originale HYMEC-Klassen "
+                                f"werden angezeigt ({type(exc).__name__}).")
+                png = render_extra(field, geo, product, stamp, cities=cities, hours=hours,
+                                   reflectivity=reflectivity,
+                                   reflectivity_geometry=reflectivity_geometry)
             st.session_state["radar_image_extra"] = (cache_key, png)
         except Exception as exc:
             st.error(f"Radaraufnahme nicht darstellbar: {type(exc).__name__}: {exc}")
@@ -280,5 +337,8 @@ def show():
         st.caption("RW: 60-Minuten-Mengen (mm) in genau einstündigem Abstand. "
                    "Unvollständige Reihen werden nicht als gültige Summe angezeigt.")
     elif product == "HYMEC":
-        st.caption("HYMEC ist eine Radar- und Zusatzdatenanalyse der Niederschlagsart "
-                   "in 2 m Höhe, keine direkte Einzelmessung der Niederschlagsart.")
+        st.caption("HYMEC: bodennahe Niederschlagsart (DWD). Intensitätsstufen für "
+                   "Regen und Schnee sind eigene, näherungsweise Schätzungen aus "
+                   "zeitgleicher WN-Radarreflektivität (Regen stark ab 40 dBZ; "
+                   "Schnee mittel ab 20 dBZ, stark ab 30 dBZ). "
+                   "Ohne WN bleiben die ursprünglichen HYMEC-Klassen erhalten.")
