@@ -23,7 +23,7 @@ CAPABILITIES = {
     },
     "GFS": {
         "Deutschland": SYNOPTIC + ["2-m-Temperatur", "Taupunkt", "Windböen",
-            "Neuschneemenge", "Schneehöhe", "Windchill"],
+            "Neuschneemenge", "Schneehöhe", "Windchill", "Schneefallgrenze (Schätzung)"],
         "Mitteleuropa": SYNOPTIC + ["Neuschneemenge", "Schneehöhe", "Windchill"],
         "Europa & Nordatlantik": SYNOPTIC + ["Neuschneemenge", "Schneehöhe", "Windchill"],
     },
@@ -71,6 +71,9 @@ def show_model_maps():
         if model=="ICON-D2-RUC":
             from icon_d2_ruc import show
             show(region, forced_parameter=parameter)
+        elif model=="GFS" and parameter=="Schneefallgrenze (Schätzung)":
+            from snowline import show
+            show(region)
         elif model in ("AIGFS","AIGEFS Mittel"):
             from ai_models import show
             show(region, forced_model=model, forced_parameter=parameter)
