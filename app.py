@@ -647,8 +647,18 @@ if map_region == '🌍 Globalmodelle':
     st.stop()
 
 if map_region in ('Mitteleuropa','Europa & Nordatlantik'):
-    from icon_eu import show as show_icon_eu
-    show_icon_eu(map_region)
+    regional_model = st.segmented_control(
+        "Wettermodell",
+        ["ICON-EU", "GFS", "ECMWF IFS", "GEFS Mittel"],
+        default="ICON-EU",
+        key="regional_synoptic_model",
+    )
+    if regional_model in ("ECMWF IFS", "GEFS Mittel"):
+        from global_models import show as show_regional_global
+        show_regional_global(map_region, forced_model=regional_model)
+    else:
+        from icon_eu import show as show_icon_eu
+        show_icon_eu(map_region, forced_model=regional_model)
     st.stop()
 krumet_mode = map_region == 'KRUMET'
 if krumet_mode:
