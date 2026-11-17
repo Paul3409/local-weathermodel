@@ -66,14 +66,18 @@ def run_picker(model,key,allow_auto=False):
     with st.spinner("Modellläufe prüfen …"):
         checks=[probe(model,run) for run in all_runs]
     verified=[run for run,ok in zip(all_runs,checks) if ok is True]
+    # Never hide older candidates: DWD/NOAA may remove an index while
+    # individual archived forecast files remain retrievable.
+    runs=all_runs
     if verified:
-        runs=verified
-        st.caption(f"{len(verified)} Modellläufe anhand veröffentlichter Quelldaten bestätigt (bis 48 h zurück). Einzelne Prognoseschritte können fehlen.")
+        st.caption(f"{len(verified)} von {len(all_runs)} Läufen durch Quelldaten bestätigt. Alle Laufkandidaten bleiben auswählbar; einzelne Prognoseschritte werden beim Abruf geprüft.")
     else:
-        runs=all_runs
-        st.caption("Laufverfügbarkeit konnte nicht bestätigt werden. Angezeigte UTC-Zyklen sind Kandidaten; Prüfung beim Kartenabruf.")
+        st.caption("Keine Laufbestätigung durch die Vorprüfung. Alle älteren UTC-Zyklen bleiben auswählbar; Verfügbarkeit wird beim Kartenabruf geprüft.")
     options=([None]+runs) if allow_auto else runs
     def label(run):
-        return "Automatisch · jüngster bestätigter Lauf" if run is None else f"{run:%d.%m.%Y %H} UTC"
+        if run is None:
+            return "Automatisch · jüngster abrufbarer Lauf"
+        suffix=" ✓ bestätigt" if run in verified else " · nicht vorgeprüft"
+        return f"{run:%d.%m.%Y %H} UTC"+suffix
     return st.selectbox("Modelllauf auswählen (UTC)",options,
                         format_func=label,key=key)
