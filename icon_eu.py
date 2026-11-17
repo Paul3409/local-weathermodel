@@ -635,7 +635,8 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     return frame_png(output.getvalue(), parameter, model, region, run, valid)
 
 def show(region, forced_model=None, forced_parameter=None):
-    st.subheader(f"Wettermodelle · {region}")
+    if forced_model is None:
+        st.subheader(f"Wettermodelle · {region}")
     model=forced_model or st.segmented_control("Wettermodell",["ICON-EU","ICON-D2","GFS"] if region=="Deutschland" else ["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
     st.caption("ICON-D2: Deutschland bis +48 h stündlich (sofern die DWD-Dateien verfügbar sind). ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
