@@ -34,7 +34,7 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,21 +64,32 @@ jobs:
           model=os.environ['MODEL']
           place=os.environ['PLACE']
           scheduled=os.environ['EVENT_NAME'] in ('schedule','push')
-          # Publish short range first, including the newest available cycle.
-          # +120 h uses the same cached GEFS point data for +0..48 h.
+          # Newest eligible GEFS cycle takes priority. Published +48h files
+          # remain visible while the longer +120h product is prepared.
           parameters=['T850','T2'] if scheduled else shlex.split(os.environ['PARAMS'])
-          horizons=[48,120] if model=='GEFS' else [48]
           cycles=recent_cycles(model,count=2)
-          # Priority: newest +48 h, newest +120 h, then older fallback.
-          for run in cycles:
+          for index,run in enumerate(cycles):
+              horizons=[48,120] if model=='GEFS' and index==0 else [48]
               for horizon in horizons:
+                  if horizon==120:
+                      # Probe the farthest step before requesting 1,302 GRIB
+                      # subregions for a cycle not yet fully published by NOAA.
+                      from ensembles import gefs_point, PLACES
+                      lat,lon=PLACES[place]
+                      try:
+                          gefs_point(run,120,0,'t2',lat,lon)
+                      except Exception as exc:
+                          print(f"NOT YET AVAILABLE {model} {run:%Y%m%d%H} +120h: {exc}")
+                          continue
                   for param in parameters:
                       path=image_path(model,place,param,run,horizon)
                       if path.exists():
                           print(f"EXISTS {path}")
                           continue
                       try:
-                          generate(model,place,run,horizon,param)
+                          published=generate(model,place,run,horizon,param)
+                          if not published:
+                              print(f"DEFERRED {model} {run:%Y%m%d%H} {param} +{horizon}h")
                       except Exception as exc:
                           print(f"NOT READY {model} {run:%Y%m%d%H} {param} +{horizon}h: {exc}")
           PY
