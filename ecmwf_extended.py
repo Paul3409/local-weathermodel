@@ -29,18 +29,20 @@ def _request_json(url,params=None):
 def catalogue():
     result=_request_json(API+"products/")
     if isinstance(result,dict):
-        result=result.get("products",result.get("results",[]))
+        result=result.get("products") or result.get("results") or result.get("data") or []
+    if isinstance(result,dict):
+        result=list(result.values())
     if not isinstance(result,list):
         raise RuntimeError("ECMWF hat einen unerwarteten Produktkatalog zurückgegeben.")
     return result
 
 def _name(entry):
     if not isinstance(entry,dict):return ""
-    return str(entry.get("name") or entry.get("id") or entry.get("product") or "")
+    return str(entry.get("name") or entry.get("id") or entry.get("product") or entry.get("slug") or "")
 
 def _description(entry):
     if not isinstance(entry,dict):return ""
-    return " ".join(str(entry.get(k,"")) for k in ("name","title","description","label")).lower()
+    return " ".join(str(entry.get(k,"")) for k in ("name","title","description","label","category","tags","type","group")).lower()
 
 def discover_products(parameter):
     """Show only actual ECMWF catalog products; never invent product IDs."""
@@ -68,16 +70,21 @@ def chart_metadata(product,step,projection):
     data=_request_json(API+f"products/{product}/",params=params)
     if not isinstance(data,dict):
         raise RuntimeError("Ungültige Antwort der ECMWF-Kartenschnittstelle.")
-    record=data.get("data") or {}
-    url=(record.get("link") or {}).get("href")
+    record=data.get("data") or data
+    if isinstance(record,list):
+        record=next((item for item in record if isinstance(item,dict)),{})
+    if not isinstance(record,dict):
+        raise RuntimeError("ECMWF hat keine gültigen Kartenmetadaten geliefert.")
+    link=record.get("link") or record.get("url") or record.get("image") or {}
+    url=link.get("href") or link.get("url") if isinstance(link,dict) else link
     attributes=record.get("attributes") or {}
-    if not url or urlparse(url).hostname not in ("charts.ecmwf.int","www.ecmwf.int"):
+    if not isinstance(url,str) or urlparse(url).scheme!="https" or urlparse(url).hostname not in ("charts.ecmwf.int","www.ecmwf.int"):
         raise RuntimeError("ECMWF hat keine gültige Kartenadresse geliefert.")
     return url,str(attributes.get("description") or ""),str(attributes.get("title") or product)
 
 @st.cache_data(ttl=1800,show_spinner=False)
 def download_chart(url):
-    if urlparse(url).hostname not in ("charts.ecmwf.int","www.ecmwf.int"):
+    if urlparse(url).scheme!="https" or urlparse(url).hostname not in ("charts.ecmwf.int","www.ecmwf.int"):
         raise ValueError("Unerwarteter Kartenserver.")
     r=requests.get(url,headers=HEADERS,timeout=(6,35))
     r.raise_for_status()
