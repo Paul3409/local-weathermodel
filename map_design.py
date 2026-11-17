@@ -1,4 +1,4 @@
-"""Shared navy-blue presentation for ELBTAL PNG maps.
+"""Shared navy-blue presentation for MeteoOst PNG maps.
 
 Only presentation is changed. The rendered model field, colormaps and
 meteorological classification remain untouched.
