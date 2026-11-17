@@ -34,7 +34,7 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 110
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,8 +64,8 @@ jobs:
           model=os.environ['MODEL']
           place=os.environ['PLACE']
           scheduled=os.environ['EVENT_NAME'] in ('schedule','push')
-          # Newest eligible GEFS cycle takes priority. Published +48h files
-          # remain visible while the longer +120h product is prepared.
+          # Newest eligible GEFS cycle takes priority. Publish short-range
+          # previews before the expensive +240h/+384h background stage.
           parameters=['T850','T2'] if scheduled else shlex.split(os.environ['PARAMS'])
           cycles=recent_cycles(model,count=2)
           for index,run in enumerate(cycles):
@@ -107,58 +107,59 @@ jobs:
             git push origin HEAD:main
           fi
 
-      - name: Generate newest GEFS +240h (T850, T2, T2 + precipitation)
+      - name: Build latest GEFS +240h and +384h incrementally
         if: ${{ (github.event.inputs.model || 'GEFS') == 'GEFS' }}
         env:
           PLACE: ${{ github.event.inputs.place || 'Mühlberg (Elbe)' }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
-          # Long-range work must not prevent publication of the short-range PNGs.
-          # Limit the long-range phase so GitHub still has time to commit its output.
-          timeout --signal=TERM --kill-after=30s 75m python - <<'PY' || echo "Long-range build deferred to next scheduled check"
+          # Hourly follow-up reuses cached GEFS member values from the last
+          # worker. The short-range graphics were published in the step above.
+          timeout --signal=TERM --kill-after=30s 100m python - <<'PY' || echo "Long-range continuation deferred to next hourly run"
           from ensemble_archive import generate, image_path
           from model_cycles import recent_cycles
           from ensembles import gefs_point, PLACES
-          import os
 
-          place=os.environ['PLACE']
-          run=recent_cycles('GEFS',count=1)[0]
+          model='GEFS'
+          place='Mühlberg (Elbe)'
+          run=recent_cycles(model,count=1)[0]
           lat,lon=PLACES[place]
-          horizon=240
-          parameters=['T850','T2','T2 + Niederschlag']
-          todo=[parameter for parameter in parameters
-                if not image_path('GEFS',place,parameter,run,horizon).exists()]
-          if not todo:
-              print(f"+240h already published for {run:%Y%m%d%H}")
-          else:
-              # Verify the farthest lead and APCP availability before bulk requests.
-              probe_fields=['t2']+(['precip'] if 'T2 + Niederschlag' in todo else [])
-              usable=True
-              for field in probe_fields:
+          # First extend the three existing products to +240h. Then build
+          # the full +384h set, including snow-depth increments and MSLP.
+          stages=[
+              (240,['T850','T2','T2 + Niederschlag']),
+              (384,['T850','T2','T2 + Niederschlag','Neuschnee','MSLP']),
+          ]
+          for horizon,parameters in stages:
+              missing=[p for p in parameters
+                       if not image_path(model,place,p,run,horizon).exists()]
+              if not missing:
+                  print(f"ALL READY {run:%Y%m%d%H} +{horizon}h",flush=True)
+                  continue
+              try:
+                  # A single valid control member is a cheap availability
+                  # probe, not a claim that all ensemble members exist.
+                  gefs_point(run,horizon,0,'t2',lat,lon)
+              except Exception as exc:
+                  print(f"NOT YET AVAILABLE {run:%Y%m%d%H} +{horizon}h: {exc}",flush=True)
+                  continue
+              for param in missing:
                   try:
-                      gefs_point(run,horizon,0,field,lat,lon)
+                      result=generate(model,place,run,horizon,param)
+                      print(f"{'READY' if result else 'DEFERRED'} {run:%Y%m%d%H} +{horizon}h {param}",flush=True)
                   except Exception as exc:
-                      print(f"GEFS {run:%Y%m%d%H} +240h {field} not ready: {exc}")
-                      usable=False
-              if usable:
-                  for parameter in todo:
-                      try:
-                          published=generate('GEFS',place,run,horizon,parameter)
-                          if not published:
-                              print(f"DEFERRED {parameter} {run:%Y%m%d%H} +240h")
-                      except Exception as exc:
-                          print(f"NOT READY {parameter} {run:%Y%m%d%H} +240h: {exc}")
+                      print(f"NOT READY {run:%Y%m%d%H} +{horizon}h {param}: {exc}",flush=True)
           PY
-      - name: Publish +240h PNGs without blocking short-range maps
+      - name: Publish long-range graphics and reusable GEFS point cache
         if: ${{ (github.event.inputs.model || 'GEFS') == 'GEFS' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ensemble_png/
+          mkdir -p ensemble_png ensemble_cache
+          git add ensemble_png/ ensemble_cache/
           if git diff --cached --quiet; then
-            echo "No new +240h PNG available yet"
+            echo "No newly available +240h/+384h data"
           else
-            git commit -m "data: publish ELBTAL GEFS +240h ensemble PNGs"
+            git commit -m "data: publish GEFS long-range ensembles and point cache"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
