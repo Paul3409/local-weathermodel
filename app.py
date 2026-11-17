@@ -1,7 +1,7 @@
 from map_design import style_figure, frame_png
 # Version shown in the app header (kept here for APK refresh testing).
 VERSION = "1.27.5"
-"""ELBTAL-T2M v0.5.3 – ESA WorldCover offline land-use raster."""
+"""MeteoOst-T2M v0.5.3 – ESA WorldCover offline land-use raster."""
 import bz2
 import io
 import tempfile
@@ -40,7 +40,7 @@ PLACES = {
 # Slightly wider longitude extent so the eastern towns remain visible.
 LON_MAX = 13.40
 TZ = ZoneInfo('Europe/Berlin')
-HEADERS = {'User-Agent': 'ELBTAL-T2M/0.3 (educational weather visualization)'}
+HEADERS = {'User-Agent': 'MeteoOst-T2M/0.3 (educational weather visualization)'}
 
 
 def fetch(url, timeout=35):
@@ -227,7 +227,7 @@ WORLDCOVER_CLASSES = {10: 1, 20: 1, 30: 2, 40: 2, 50: 4,
 
 
 def get_landuse():
-    """Fetch only the Elbtal window from ESA's cloud-optimized GeoTIFF.
+    """Fetch only the MeteoOst window from ESA's cloud-optimized GeoTIFF.
 
     Called exclusively by the one-time preparation button. The raster
     remains local to the Streamlit session until the NPZ is downloaded.
@@ -315,7 +315,7 @@ def landuse_temperature_correction(landuse, valid, amplitude=1.0):
 
 
 TEMP_STOPS = [(-20,'#9851BD'),(-15,'#4C207F'),(-10,'#16346E'),(-5,'#3377C6'),(0,'#B8E5F4'),(.4999,'#B8E5F4'),(.5,'#174C35'),(5,'#438A49'),(10,'#A9C64D'),(15,'#F0D64B'),(20,'#F5B16C')]
-TEMP_CMAP = LinearSegmentedColormap.from_list('elbtal', [((t+20)/40,c) for t,c in TEMP_STOPS], N=4096)
+TEMP_CMAP = LinearSegmentedColormap.from_list('meteoost', [((t+20)/40,c) for t,c in TEMP_STOPS], N=4096)
 TEMP_CMAP.set_under('#9851BD')
 TEMP_CMAP.set_over('#F5B16C')
 TEMP_NORM = Normalize(-20,20)
@@ -417,7 +417,7 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), ('Taupunkt' if 'Taupunkt' in mode else 'Temperatur'), model_name, 'Sachsen + Umgebung' if model_name=='KRUMET' else 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), ('Taupunkt' if 'Taupunkt' in mode else 'Temperatur'), model_name, 'Sachsen + Umgebung' if model_name=='KRUMET' else 'MeteoOst', run, valid)
 
 
 def render_difference(X, Y, difference, run, valid, model_name='ICON-D2'):
@@ -448,11 +448,11 @@ def render_difference(X, Y, difference, run, valid, model_name='ICON-D2'):
     out = io.BytesIO()
     fig.savefig(out, format='png', bbox_inches='tight', facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), 'Temperaturdifferenz', model_name, 'Sachsen + Umgebung' if model_name=='KRUMET' else 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), 'Temperaturdifferenz', model_name, 'Sachsen + Umgebung' if model_name=='KRUMET' else 'MeteoOst', run, valid)
 
 
 GUST_STOPS = [(0,'#499FE1'),(10,'#204D99'),(20,'#347B4A'),(30,'#A3BE4B'),(40,'#E8D24A'),(50,'#F3A143'),(60,'#E96A38'),(70,'#DB3834'),(80,'#B9252E'),(90,'#811A2C'),(100,'#48205F'),(110,'#853AA8'),(120,'#C52D9A')]
-GUST_CMAP = LinearSegmentedColormap.from_list('elbtal_gust', [(v/120,col) for v,col in GUST_STOPS], N=2048)
+GUST_CMAP = LinearSegmentedColormap.from_list('meteoost_gust', [(v/120,col) for v,col in GUST_STOPS], N=2048)
 GUST_CMAP.set_under('#499FE1')
 GUST_CMAP.set_over('#C52D9A')
 GUST_NORM = Normalize(0,120)
@@ -480,7 +480,7 @@ def render_gust(X,Y,Z,run,valid,show_km_values=False):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white',alpha=.25,linewidth=.5)
-    fig.suptitle('ELBTAL  |  Windböen',fontsize=16,weight='bold',y=.98)
+    fig.suptitle('MeteoOst  |  Windböen',fontsize=16,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 Windböen · Lauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=8,pad=12)
     cb=fig.colorbar(filled,ax=ax,orientation='horizontal',fraction=.055,pad=.09)
     cb.set_ticks(np.arange(0,121,10))
@@ -492,7 +492,7 @@ def render_gust(X,Y,Z,run,valid,show_km_values=False):
     out = io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), 'Windböen', 'ICON-D2', 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), 'Windböen', 'ICON-D2', 'MeteoOst', run, valid)
 
 
 
@@ -572,7 +572,7 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
     out = io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), parameter_page, 'ICON-D2', 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), parameter_page, 'ICON-D2', 'MeteoOst', run, valid)
 
 
 
@@ -612,13 +612,25 @@ def render_fog(X,Y,Z,run,valid):
     out = io.BytesIO()
     fig.savefig(out,format='png',bbox_inches='tight',facecolor=fig.get_facecolor())
     plt.close(fig)
-    return frame_png(out.getvalue(), 'Nebelpotenzial', 'ICON-D2', 'Elbtal', run, valid)
+    return frame_png(out.getvalue(), 'Nebelpotenzial', 'ICON-D2', 'MeteoOst', run, valid)
 
 
 st.set_page_config(page_title='MeteoOst Wetterkarten', page_icon='🌦️', layout='wide')
 from v2_style import apply as apply_v2_style
 from app_version import VERSION as VERSION
 apply_v2_style()
+# Branding migration: discard only previously rendered PNGs carrying the old brand.
+# Keep user selections and all weather-data caches; maps regenerate on demand.
+if st.session_state.get("_meteoost_brand_revision") != "meteoost-2026-11":
+    for _map_cache_key in (
+        "eu_map", "eu_batch_maps", "eu_batch_maps_queue",
+        "global_map", "global_map_batch", "global_map_batch_queue",
+        "ai_map", "ai_map_batch", "ai_map_batch_queue",
+        "ruc_map", "ruc_map_batch", "ruc_map_batch_queue",
+        "krumet_images", *IMAGE_KEYS.values(),
+    ):
+        st.session_state.pop(_map_cache_key, None)
+    st.session_state["_meteoost_brand_revision"] = "meteoost-2026-11"
 st.markdown(
     f"""<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;
     margin:0 0 0.65rem 0;line-height:1.2;">
@@ -631,18 +643,18 @@ st.markdown(
 # Native refresh is reliable in Android WebView even when links are intercepted.
 # Explicitly clear Streamlit caches and session selections, then rerun the app.
 if st.button("🔄 App aktualisieren · Daten & Ansicht neu laden",
-             key="elbtal_force_refresh",use_container_width=True,type="primary"):
+             key="meteoost_force_refresh",use_container_width=True,type="primary"):
     st.cache_data.clear()
     st.cache_resource.clear()
     st.session_state.clear()
     st.rerun()
 # Optional hard browser navigation for stale HTML/JS assets after deployment.
 # This cannot deploy code that is not yet running on Streamlit Cloud.
-import time as _elbtal_time
-from html import escape as _elbtal_escape
-_reload_token = str(_elbtal_time.time_ns())
+import time as _meteoost_time
+from html import escape as _meteoost_escape
+_reload_token = str(_meteoost_time.time_ns())
 st.markdown(
-    '<a href="./?elbtal_reload=' + _elbtal_escape(_reload_token) + '" '
+    '<a href="./?meteoost_reload=' + _meteoost_escape(_reload_token) + '" '
     'target="_self" style="display:inline-block;padding:0.32rem 0.65rem;'
     'margin:0 0 0.55rem 0;border:1px solid #30536B;border-radius:0.45rem;'
     'background:#102A43;color:#B8D4E6;font-size:0.82rem;text-decoration:none;">'
@@ -652,12 +664,12 @@ st.markdown(
 # Streamlit can retain imported Python modules across script reruns and
 # deployments. Reload the navigation module so an updated menu takes effect
 # even when the app process has not restarted.
-import importlib as _elbtal_importlib
-import v2_navigation as _elbtal_navigation
-_elbtal_importlib.reload(_elbtal_navigation)
-_elbtal_navigation.show()
+import importlib as _meteoost_importlib
+import v2_navigation as _meteoost_navigation
+_meteoost_importlib.reload(_meteoost_navigation)
+_meteoost_navigation.show()
 st.stop()
-map_region = st.segmented_control('Lokales Kartengebiet', options=['Elbtal','KRUMET'], default='Elbtal', selection_mode='single')
+map_region = st.segmented_control('Lokales Kartengebiet', options=['MeteoOst','KRUMET'], default='MeteoOst', selection_mode='single')
 if map_region == '📊 Ensembles':
     from ensembles import show as show_ensembles
     show_ensembles()
