@@ -681,10 +681,10 @@ def show(region, forced_model=None, forced_parameter=None):
     elif parameter=="Windchill":
         st.caption("Berechnete Windchill-Temperatur aus 2-m-Lufttemperatur und 10-m-Wind (U/V), nicht aus Böen. Formel nur bei ≤ 10 °C und Wind > 4,8 km/h; sonst Lufttemperatur. Keine vollständige gefühlte Temperatur (Sonne/Feuchte fehlen).")
     from model_cycles import recent_cycles
-    from v2_model_runs import run_picker, candidates
+    from v2_model_runs import run_picker, candidates, probe
     run_choice=run_picker(model,"eu_run_"+model,allow_auto=True)
     run_options=candidates(model)
-    preview_run=run_choice or run_options[0]
+    preview_run=run_choice or next((r for r in run_options if probe(model,r) is True),run_options[0])
     lead=st.select_slider(
         "Vorhersagestunde · Datum und Uhrzeit (MEZ/MESZ)",
         options=(list(range(49)) if model=="ICON-D2" else EU_LEADS) if model!="GFS" else list(range(0,385,3)),value=6,
@@ -695,7 +695,7 @@ def show(region, forced_model=None, forced_parameter=None):
     if st.button(f"{model}-Karte manuell berechnen",type="primary"):
         with st.status(f"{model}-Datei und Grenzen laden …",expanded=True) as status:
             try:
-                runs=[run_choice] if run_choice is not None else recent_cycles(model, count=6)
+                runs=[run_choice] if run_choice is not None else [r for r in candidates(model) if probe(model,r) is True] or candidates(model)
                 variable="snow_gsp" if parameter=="Neuschneemenge" else ("pmsl" if parameter=="MSLP" else ("t" if parameter in ("T850","T850 + MSLP") else ("fi" if parameter=="Z500 + MSLP" else SURFACE_FIELDS.get(parameter,"t_2m"))))
                 selected=None
                 for run in runs:
