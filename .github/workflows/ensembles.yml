@@ -34,7 +34,7 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 110
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,6 +103,62 @@ jobs:
             echo "No complete new ensembles available yet"
           else
             git commit -m "data: publish completed ELBTAL ensemble PNGs"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Generate newest GEFS +240h (T850, T2, T2 + precipitation)
+        if: ${{ (github.event.inputs.model || 'GEFS') == 'GEFS' }}
+        env:
+          PLACE: ${{ github.event.inputs.place || 'Mühlberg (Elbe)' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # Long-range work must not prevent publication of the short-range PNGs.
+          # Limit the long-range phase so GitHub still has time to commit its output.
+          timeout --signal=TERM --kill-after=30s 75m python - <<'PY' || echo "Long-range build deferred to next scheduled check"
+          from ensemble_archive import generate, image_path
+          from model_cycles import recent_cycles
+          from ensembles import gefs_point, PLACES
+          import os
+
+          place=os.environ['PLACE']
+          run=recent_cycles('GEFS',count=1)[0]
+          lat,lon=PLACES[place]
+          horizon=240
+          parameters=['T850','T2','T2 + Niederschlag']
+          todo=[parameter for parameter in parameters
+                if not image_path('GEFS',place,parameter,run,horizon).exists()]
+          if not todo:
+              print(f"+240h already published for {run:%Y%m%d%H}")
+          else:
+              # Verify the farthest lead and APCP availability before bulk requests.
+              probe_fields=['t2']+(['precip'] if 'T2 + Niederschlag' in todo else [])
+              usable=True
+              for field in probe_fields:
+                  try:
+                      gefs_point(run,horizon,0,field,lat,lon)
+                  except Exception as exc:
+                      print(f"GEFS {run:%Y%m%d%H} +240h {field} not ready: {exc}")
+                      usable=False
+              if usable:
+                  for parameter in todo:
+                      try:
+                          published=generate('GEFS',place,run,horizon,parameter)
+                          if not published:
+                              print(f"DEFERRED {parameter} {run:%Y%m%d%H} +240h")
+                      except Exception as exc:
+                          print(f"NOT READY {parameter} {run:%Y%m%d%H} +240h: {exc}")
+          PY
+      - name: Publish +240h PNGs without blocking short-range maps
+        if: ${{ (github.event.inputs.model || 'GEFS') == 'GEFS' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ensemble_png/
+          if git diff --cached --quiet; then
+            echo "No new +240h PNG available yet"
+          else
+            git commit -m "data: publish ELBTAL GEFS +240h ensemble PNGs"
             git pull --rebase origin main
             git push origin HEAD:main
           fi
