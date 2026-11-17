@@ -73,7 +73,8 @@ def field(model,run,lead,parameter,region):
     return decode(raw,run+timedelta(hours=lead),REGIONS[region],code)
 
 def show(region,forced_model=None,forced_parameter=None):
-    st.subheader(f"NOAA KI-Wettermodelle · {region}")
+    if forced_model is None:
+        st.subheader(f"NOAA KI-Wettermodelle · {region}")
     model=forced_model or st.segmented_control("Modell",["AIGFS","AIGEFS Mittel"],default="AIGFS",key="ai_model")
     st.caption("Originaldaten NOAA NOMADS · AIGEFS Mittel = räumliche Karten des Ensemblemittels, keine Diagramme. Kein Open-Meteo.")
     runs=recent_cycles(model,count=9)
