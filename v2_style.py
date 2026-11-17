@@ -35,9 +35,18 @@ div.stButton > button[kind="secondary"] { border-radius:10px; border-color:#315b
 div[data-testid="stImage"] img { border-radius:9px; max-width:100%; }
 hr { border-color:#284862!important; }
 @media(max-width:640px) {
- .block-container { padding:1rem .8rem 2.5rem; }
- div[data-testid="stPopover"] > button { min-height:52px; }
- h1 { line-height:1.2!important; }
+ /* Compact APK/WebView layout: keep model menus comfortably touchable. */
+ .block-container { padding:.65rem .8rem 2rem; }
+ h1 { font-size:clamp(1.25rem,5vw,1.6rem)!important; line-height:1.12!important; letter-spacing:-.035em!important; }
+ h2 { font-size:1.5rem!important; line-height:1.2!important; }
+ h3 { font-size:1.25rem!important; }
+ div[data-testid="stPopover"] > button {
+   min-height:44px;
+   padding:.4rem .65rem!important;
+   font-size:.92rem!important;
+ }
+ div[data-testid="stPopoverBody"] button { min-height:43px; }
+ [data-testid="stCaptionContainer"] { font-size:.77rem!important; }
 }
 </style>
 """, unsafe_allow_html=True)
