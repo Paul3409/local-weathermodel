@@ -19,6 +19,8 @@ WEEK_STEPS=[168,336,504,672,840,1008]
 
 def _request_json(url,params=None):
     r=requests.get(url,params=params,headers=HEADERS,timeout=(6,22))
+    if r.status_code == 404 and url.rstrip("/") == (API+"products").rstrip("/"):
+        raise RuntimeError("Der von ECMWF dokumentierte OpenCharts-Produktkatalog liefert HTTP 404. Die Schnittstelle ist derzeit unter dieser Adresse nicht verfügbar.")
     r.raise_for_status()
     result=r.json()
     if isinstance(result,dict) and result.get("error"):
@@ -103,7 +105,8 @@ def show():
         with st.spinner("Offizielle ECMWF-Kartenprodukte suchen …"):
             products=discover_products(parameter)
     except (requests.RequestException,ValueError,RuntimeError) as exc:
-        st.warning(f"Der ECMWF-Produktkatalog ist gerade nicht erreichbar: {exc}")
+        st.warning(f"ECMWF-OpenCharts kann aktuell nicht automatisch geladen werden: {exc}")
+        st.info("Die offiziellen ECMWF-Langfristkarten können weiterhin direkt im ECMWF-Kartenbrowser geprüft werden. ELBTAL zeigt bewusst keine erfundenen Ersatzkarten.")
         st.link_button("Offizielle ECMWF-Karten öffnen","https://charts.ecmwf.int/")
         return
     if not products:
