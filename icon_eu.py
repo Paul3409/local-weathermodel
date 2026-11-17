@@ -789,9 +789,9 @@ def show(region, forced_model=None, forced_parameter=None):
                 status.update(label=f"{model}-Verarbeitung fehlgeschlagen",state="error")
                 st.error(f"{type(exc).__name__}: {exc}")
 
-    if model in ("ICON-D2","ICON-EU"):
+    if model in ("ICON-D2","ICON-EU","GFS"):
         st.markdown("**⚡ Prognosezeitraum vorladen**")
-        available_hours=list(range(49)) if model=="ICON-D2" else EU_LEADS
+        available_hours=list(range(49)) if model=="ICON-D2" else (list(range(0,385,3)) if model=="GFS" else EU_LEADS)
         first,last=st.select_slider(
             "Zeitraum auswählen",options=available_hours,
             value=(0,6),key="eu_batch_range_"+model,
@@ -820,7 +820,7 @@ def show(region, forced_model=None, forced_parameter=None):
     if st.button(f"{model}-Karte manuell berechnen",type="primary"):
         _calculate_map(lead)
     # A batch result remains available when moving the hour slider.
-    if model in ("ICON-D2","ICON-EU"):
+    if model in ("ICON-D2","ICON-EU","GFS"):
         for (version,m,r,p,run,h),(valid,png) in reversed(list(st.session_state.get("eu_batch_maps",{}).items())):
             if (version,m,r,p,h)==(MAP_STYLE_VERSION,model,region,parameter,lead):
                 st.session_state["eu_map"]=(version,m,r,p,h,valid,png)
