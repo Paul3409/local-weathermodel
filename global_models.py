@@ -199,11 +199,11 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     out=io.BytesIO();fig.savefig(out,format="png",bbox_inches="tight");plt.close(fig)
     return frame_png(out.getvalue(),"MSLP-Anomalie",model,region,run,valid)
 
-def show(region, forced_model=None):
+def show(region, forced_model=None, forced_parameter=None):
     st.subheader(f"Globale Modelle · {region}")
     model=forced_model or st.segmented_control("Modell",["ECMWF IFS","GEFS Mittel"],default="ECMWF IFS",key="global_model")
     st.caption("Direktdaten: ECMWF Open Data (IFS oper) / NOAA NOMADS (GEFS geavg). Kein Open-Meteo.")
-    available=cycles(model)
+    available=recent_cycles(model, count=9)
     run=st.selectbox("Vier letzte berechnete Modellzyklen (UTC)",available,
         format_func=lambda d:f"{d:%d.%m.%Y %H} UTC",key="global_run_"+model)
     st.caption("UTC-Initialisierung, nicht Fertigstellungszeit. Modellabhängige Verzögerung berücksichtigt; Dateiverfügbarkeit beim Abruf geprüft.")
@@ -213,7 +213,7 @@ def show(region, forced_model=None):
         key="global_lead_"+model)
     parameters=["MSLP","T850","T850 + MSLP","Z500 + MSLP","MSLP-Anomalie"]
     if model=="ECMWF IFS":parameters+=["T2","Schneehöhe"]
-    parameter=st.radio("Parameter",parameters,horizontal=True,key="global_parameter_"+model)
+    parameter=forced_parameter if forced_parameter in parameters else st.radio("Parameter",parameters,horizontal=True,key="global_parameter_"+model)
     if parameter=="Schneehöhe":
         st.caption("ECMWF-Schneehöhe in cm, berechnet aus Schneewasseräquivalent (sd) und prognostizierter Schneedichte (rsn).")
     if parameter=="MSLP-Anomalie":
