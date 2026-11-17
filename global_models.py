@@ -218,7 +218,7 @@ def show(region, forced_model=None, forced_parameter=None):
         st.caption("ECMWF-Schneehöhe in cm, berechnet aus Schneewasseräquivalent (sd) und prognostizierter Schneedichte (rsn).")
     if parameter=="MSLP-Anomalie":
         st.caption("Referenz: NOAA PSL NCEP/NCAR Reanalysis 1, Monatsmittel 1991–2020 (2,5°). Automatischer Download; Monatsklimatologie, kein tagesgenauer ERA5-Vergleich.")
-    if st.button("Globale Karte berechnen",type="primary",key="global_generate"):
+    def _calculate_one(lead):
         try:
             with st.spinner(f"{model} direkt herunterladen und berechnen …"):
                 valid=run+timedelta(hours=lead)
@@ -232,8 +232,44 @@ def show(region, forced_model=None, forced_parameter=None):
                     png=anomaly_map(X,Y,Z,baseline,region,model,run,valid)
                 else:png=render(X,Y,Z,region,"2-m-Temperatur" if parameter=="T2" else parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["global_map"]=(model,region,run,lead,parameter,valid,png)
+
+                st.session_state.setdefault("global_map_batch",{})[(model,region,run,lead,parameter)]=png
         except Exception as exc:
             st.error(f"Modellabruf fehlgeschlagen: {type(exc).__name__}: {exc}")
+    st.markdown("**⚡ Prognosezeitraum vorladen**")
+    _batch_options=options
+    _first,_last=st.select_slider("Zeitraum auswählen",options=_batch_options,
+        value=(_batch_options[0],_batch_options[min(3,len(_batch_options)-1)]),
+        key="global_map_batch_range",
+        format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m. %H:%M}")
+    _interval=st.selectbox("Kartenabstand (Stunden)",[1,2,3,6,12],index=2,
+        key="global_map_batch_interval")
+    _hours=[h for h in _batch_options if _first<=h<=_last and (h-_first)%_interval==0]
+    st.caption(f"{len(_hours)} Karten · fertig berechnete Karten erscheinen sofort.")
+    if st.button(f"⚡ {len(_hours)} Karten vorladen",key="global_map_batch_start"):
+        _progress=st.progress(0)
+        _gallery=st.container()
+        _ok=0
+        for _i,_hour in enumerate(_hours):
+            _batch_key=(model,region,run,_hour,parameter)
+            _cached=st.session_state.get("global_map_batch",{})
+            if _batch_key not in _cached:
+                _calculate_one(_hour)
+                _cached=st.session_state.get("global_map_batch",{})
+            if _batch_key in _cached:
+                with _gallery:
+                    st.caption(f"+{_hour} h · {(run+timedelta(hours=_hour)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
+                    st.image(_cached[_batch_key],width="stretch")
+                _ok+=1
+            _progress.progress((_i+1)/len(_hours),text=f"{_i+1}/{len(_hours)} verarbeitet · {_ok} fertig")
+        st.success(f"{_ok}/{len(_hours)} Karten verfügbar.")
+    if st.button("Globale Karte berechnen",type="primary",key="global_generate"):
+        _calculate_one(lead)
+    _cached_png=st.session_state.get("global_map_batch",{}).get((model,region,run,lead,parameter))
+    if _cached_png is not None:
+        _current=st.session_state.get("global_map")
+        if not _current or _current[:5]!=(model,region,run,lead,parameter):
+            st.session_state["global_map"]=(model,region,run,lead,parameter,run+timedelta(hours=lead),_cached_png)
     result=st.session_state.get("global_map")
     if result and result[:5]==(model,region,run,lead,parameter):
         st.image(result[6],use_container_width=True)
