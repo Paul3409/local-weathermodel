@@ -16,6 +16,8 @@ PUBLICATION_DELAY_HOURS = {
     "GEFS Mittel": 6,
     "ECMWF IFS": 7,
     "ECMWF ENS": 8,
+    "AIGFS": 6,
+    "AIGEFS Mittel": 7,
 }
 
 def recent_cycles(model, now=None, count=4):
