@@ -402,7 +402,7 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white', alpha=.25, linewidth=.5)
-    fig.suptitle(('KRUMET | ' if model_name=='KRUMET' else 'ELBTAL | ')+('2-m-Taupunkt' if 'Taupunkt' in mode else '2-m-Temperatur'), fontsize=16, weight='bold', y=.98)
+    fig.suptitle(('KRUMET | ' if model_name=='KRUMET' else 'MeteoOst | ')+('2-m-Taupunkt' if 'Taupunkt' in mode else '2-m-Temperatur'), fontsize=16, weight='bold', y=.98)
     ax.set_title(f'{mode}  ·  Lauf: {run:%d.%m.%Y %H:%M} UTC  ·  Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M} MEZ/MESZ', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_ticks([-20,-15,-10,-5,0,.5,5,10,15,20])
@@ -439,7 +439,7 @@ def render_difference(X, Y, difference, run, valid, model_name='ICON-D2'):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white', alpha=.25, linewidth=.5)
-    fig.suptitle(('KRUMET' if model_name=='KRUMET' else 'ELBTAL-T2M')+' | Differenzkarte', fontsize=16, weight='bold', y=.98)
+    fig.suptitle(('KRUMET' if model_name=='KRUMET' else 'MeteoOst-T2M')+' | Differenzkarte', fontsize=16, weight='bold', y=.98)
     ax.set_title(f'Lokales Experiment minus ICON-D2 · Lauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M}', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_label('Temperaturabweichung (°C)')
@@ -562,7 +562,7 @@ def render_precip(X,Y,Z,run,valid,parameter_page,show_km_values=False):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white',alpha=.2,linewidth=.5)
-    fig.suptitle('ELBTAL  |  '+parameter_page,fontsize=16,weight='bold',y=.98)
+    fig.suptitle('MeteoOst  |  '+parameter_page,fontsize=16,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 · Lauf {run:%d.%m.%Y %H:%M} UTC · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=8,pad=12)
     fig.text(.5,.025,'DWD ICON-D2 · Modellwerte, keine Messungen',ha='center',fontsize=8,color='#48566a')
     if parameter_page == '🌦️ Signifikantes Wetter':
@@ -605,7 +605,7 @@ def render_fog(X,Y,Z,run,valid):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white',alpha=.2,linewidth=.5)
-    fig.suptitle('ELBTAL | Nebelpotenzial (experimentell)',fontsize=14,weight='bold',y=.98)
+    fig.suptitle('MeteoOst | Nebelpotenzial (experimentell)',fontsize=14,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=9)
     fig.text(.5,.025,'Heuristik: Feuchte/Wind/optional tiefe Wolken · Regen separat · keine Nebelwahrscheinlichkeit',ha='center',fontsize=8)
     style_figure(fig, ax)
@@ -615,7 +615,7 @@ def render_fog(X,Y,Z,run,valid):
     return frame_png(out.getvalue(), 'Nebelpotenzial', 'ICON-D2', 'Elbtal', run, valid)
 
 
-st.set_page_config(page_title='ELBTAL Wetterkarten', page_icon='🌦️', layout='wide')
+st.set_page_config(page_title='MeteoOst Wetterkarten', page_icon='🌦️', layout='wide')
 from v2_style import apply as apply_v2_style
 from app_version import VERSION as VERSION
 apply_v2_style()
@@ -623,7 +623,7 @@ st.markdown(
     f"""<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;
     margin:0 0 0.65rem 0;line-height:1.2;">
     <span style="font-size:clamp(1.12rem,4.6vw,1.65rem);font-weight:800;
-    color:#f3f8ff;white-space:nowrap;">🌦️ ELBTAL · Wetterkarten</span>
+    color:#f3f8ff;white-space:nowrap;">🌦️ MeteoOst · Wetterkarten</span>
     <span style="font-size:0.82rem;font-weight:700;color:#9cddf1;
     white-space:nowrap;">(v{VERSION})</span></div>""",
     unsafe_allow_html=True,
@@ -1005,7 +1005,7 @@ if image_key in st.session_state:
     png = selected_map if variant == 'Differenz zu ICON-D2' else selected_map[int(show_km_values)]
     st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
-                       file_name=f'ELBTAL_{image_key}_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
+                       file_name=f'MeteoOst_{image_key}_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
 
 
 if krumet_mode and st.session_state.get('krumet_station_samples'):
