@@ -15,6 +15,25 @@ def image_path(model,place,parameter,run,horizon):
     slug=lambda text:re.sub(r"[^a-z0-9]+","-",text.lower()).strip("-")
     return ROOT/slug(model)/run.strftime("%Y%m%d%H")/slug(place)/f"{slug(parameter)}_{horizon:03d}.png"
 
+def available_images(model,place,parameter):
+    """Newest locally published images first; never infer availability from model cycles."""
+    from datetime import datetime
+    reference=image_path(model,place,parameter,datetime(2000,1,1,tzinfo=timezone.utc),48)
+    model_dir=ROOT/reference.relative_to(ROOT).parts[0]
+    place_slug=reference.parent.name
+    prefix=reference.stem.rsplit("_",1)[0]
+    found=[]
+    for file in (ROOT/model_dir).glob(f"*/{place_slug}/{prefix}_*.png"):
+        try:
+            run=datetime.strptime(file.parent.parent.name,"%Y%m%d%H").replace(tzinfo=timezone.utc)
+            horizon=int(file.stem.rsplit("_",1)[-1])
+            if file.is_file() and file.stat().st_size>1000:
+                found.append((run,horizon,file))
+        except (ValueError,OSError):
+            continue
+    return sorted(found,key=lambda item:(item[0],item[1]),reverse=True)
+
+
 def generate(model,place,run,horizon,parameter):
     # Imported only by the scheduled GitHub worker, never on a Streamlit page view.
     from ensembles import PLACES,FIELDS,fetch,draw
@@ -42,7 +61,14 @@ def generate(model,place,run,horizon,parameter):
         return False
     path=image_path(model,place,parameter,run,horizon)
     path.parent.mkdir(parents=True,exist_ok=True)
-    path.write_bytes(draw(model,place,run,field,steps,data,precipitation))
+    main=None
+    if model=="GEFS":
+        from ensembles import fetch_gfs_main
+        main,main_errors=fetch_gfs_main(run,field,lat,lon,steps)
+        errors+=main_errors
+        if parameter=="Neuschnee":
+            main=np.maximum(np.diff(main,prepend=np.nan),0)
+    path.write_bytes(draw(model,place,run,field,steps,data,precipitation,main=main))
     print(f"CREATED {path} | completeness {np.isfinite(data).mean():.1%} | errors {len(errors)}")
     return True
 
