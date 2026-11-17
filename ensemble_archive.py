@@ -28,18 +28,22 @@ def generate(model,place,run,horizon,parameter):
     if parameter=="T2 + Niederschlag":
         precipitation,other_errors=fetch(model,run,"precip",lat,lon,steps)
         errors+=other_errors
-    # Do not publish incomplete or misleading diagrams. All requested members
-    # and time steps must exist; step zero is not mandatory for accumulated fields.
+    # A single missing GRIB value must not discard an otherwise useful ensemble.
+    # Keep missing points as NaN (visible gaps); never interpolate model values.
     def complete(values):
-        return np.isfinite(values[:,1:] if parameter=="Neuschnee" else values).all()
-    if not complete(data) or (precipitation is not None and not np.isfinite(precipitation).all()):
+        usable = values[:, 1:] if parameter=="Neuschnee" else values
+        finite = np.isfinite(usable)
+        return (finite.mean() >= 0.85 and
+                (finite.mean(axis=0) >= 0.70).all() and
+                (finite.mean(axis=1) >= 0.60).all())
+    if not complete(data) or (precipitation is not None and not complete(precipitation)):
         valid=int(np.isfinite(data).sum())
         print(f"NOT READY {model} {place} {parameter}: {valid}/{data.size} values; errors={len(errors)}")
         return False
     path=image_path(model,place,parameter,run,horizon)
     path.parent.mkdir(parents=True,exist_ok=True)
     path.write_bytes(draw(model,place,run,field,steps,data,precipitation))
-    print(f"CREATED {path}")
+    print(f"CREATED {path} | completeness {np.isfinite(data).mean():.1%} | errors {len(errors)}")
     return True
 
 def main():
