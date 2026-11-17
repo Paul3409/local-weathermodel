@@ -1,2 +1,2 @@
 """Central ELBTAL application release version. Managed by the version workflow."""
-VERSION = "1.19.3"
+VERSION = "1.19.4"
