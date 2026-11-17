@@ -276,7 +276,17 @@ def load_grid(url, valid, bounds, variable):
                     Z=griddata(np.column_stack((lon,lat)),vals,(X,Y),method="nearest" if variable=="ww" else "linear")
                     if variable=="ww" and not np.isfinite(Z).all():
                         raise RuntimeError("Ungültige WW-Werte im Modellfeld.")
-                    if not np.isfinite(Z).all():
+                    # ICON-EU is regional. On the extended Atlantic map keep the
+                    # native model footprint: do not extrapolate beyond the convex
+                    # hull of available grid points with nearest-neighbour values.
+                    if bounds==REGIONS["Europa & Nordatlantik"] and "/icon-eu/" in url:
+                        from scipy.spatial import Delaunay
+                        if variable=="ww":
+                            hull=Delaunay(np.column_stack((lon,lat)))
+                            inside=hull.find_simplex(np.column_stack((X.ravel(),Y.ravel())))>=0
+                            Z=np.where(inside.reshape(X.shape),Z,np.nan)
+                        # Linear interpolation already leaves NaN outside hull.
+                    elif not np.isfinite(Z).all():
                         nearest=griddata(np.column_stack((lon,lat)),vals,(X,Y),method="nearest")
                         Z=np.where(np.isfinite(Z),Z,nearest)
                     return X,Y,Z
@@ -404,9 +414,17 @@ def snow_water_mask(X,Y):
 
 def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     bounds=REGIONS[region]
+    # Explicit no-data mask for the regional ICON-EU footprint.
+    regional_mask = model=="ICON-EU" and region=="Europa & Nordatlantik"
+    if regional_mask:
+        Z=np.ma.masked_invalid(Z)
+        if mslp is not None:
+            mslp=np.ma.masked_invalid(mslp)
     # A slightly shorter canvas for WW maps; preserve the full geographic extent and native data grid.
     fig,ax=plt.subplots(figsize=(10,10) if region=="Deutschland" else (12,8.5),dpi=120)
     fig.patch.set_facecolor("#f6f8fa")
+    if regional_mask:
+        ax.set_facecolor("#8a939f")  # Grey denotes outside ICON-EU domain.
     if parameter in ("Neuschneemenge","Schneehöhe"):
         from matplotlib.colors import ListedColormap, BoundaryNorm
         edges=[0,.1,.5,1,2,5,10,20,30,50,75,100,150,10000]
@@ -418,7 +436,8 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         # Water blue is a geographic background category, never a snow measurement.
         from matplotlib.colors import ListedColormap as _Listed
         water=snow_water_mask(X,Y)
-        ax.pcolormesh(X,Y,np.ma.masked_where(~water,np.ones(Z.shape)),cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
+        ocean_mask=(~water) & (~np.ma.getmaskarray(Z))
+        ax.pcolormesh(X,Y,np.ma.masked_where(~ocean_mask,np.ones(Z.shape)),cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
         label="Schneehöhe (cm)" if parameter=="Schneehöhe" else "Berechnete Neuschneehöhe seit Modellstart (cm; 10:1-Schätzung bei ICON)"
     elif parameter=="Z500 + MSLP":
         from matplotlib.colors import LinearSegmentedColormap, Normalize
