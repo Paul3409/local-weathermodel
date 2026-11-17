@@ -1,6 +1,9 @@
 name: Prepare ELBTAL ensemble PNGs
 
 on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/ensembles.yml']
   schedule:
     # Four daily refreshes; archive viewer keeps serving last published image.
     - cron: '25 5,11,17,23 * * *'
@@ -60,7 +63,7 @@ jobs:
 
           model=os.environ['MODEL']
           place=os.environ['PLACE']
-          scheduled=os.environ['EVENT_NAME']=='schedule'
+          scheduled=os.environ['EVENT_NAME'] in ('schedule','push')
           # Publish compact short-range products first. Never block the viewer
           # waiting for every +384h member to be ready.
           parameters=['T850','T2'] if scheduled else shlex.split(os.environ['PARAMS'])
