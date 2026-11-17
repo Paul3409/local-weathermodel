@@ -64,7 +64,8 @@ def read_point(data,lat,lon,expected):
                     if expected=="msl":value/=100
                     elif expected in ("t850","t2"):value-=273.15
                     elif expected=="snow" and short in ("sd","sde","snod"):value*=100
-                    elif expected=="precip" and short=="tp":value*=1000\n                    elif expected=="snow" and short=="sf":value*=1000
+                    elif expected=="precip" and short=="tp":value*=1000
+                    elif expected=="snow" and short=="sf":value*=1000
                     return value
                 finally:codes_release(gid)
     finally:
