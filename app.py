@@ -614,8 +614,11 @@ def render_fog(X,Y,Z,run,valid):
     return frame_png(out.getvalue(), 'Nebelpotenzial', 'ICON-D2', 'Elbtal', run, valid)
 
 
-st.set_page_config(page_title='ELBTAL-T2M', page_icon='🌡️', layout='centered')
-st.title(f'🌦️ ELBTAL · V{VERSION}')
+st.set_page_config(page_title='ELBTAL Wetterkarten', page_icon='🌦️', layout='wide')
+from v2_style import apply as apply_v2_style
+apply_v2_style()
+st.title(f'🌦️ ELBTAL · Wetterkarten')
+st.caption(f'WETTERKARTEN  /  VERSION {VERSION}  /  V2-DESIGNVORSCHAU')
 from v2_navigation import show as show_v2_navigation
 if show_v2_navigation():
     st.stop()
