@@ -1,0 +1,147 @@
+"""DWD ICON-D2-RUC direct native-grid maps (official Open Data v1).
+Hourly cycles, forecast hours 0..27. No Open-Meteo.
+"""
+import io
+import os
+import tempfile
+from datetime import datetime,timedelta,timezone
+from urllib.parse import quote
+import numpy as np
+import requests
+import streamlit as st
+from eccodes import codes_grib_new_from_file,codes_get,codes_get_array,codes_release
+from scipy.interpolate import griddata
+from icon_eu import REGIONS,LOCAL_TZ,render
+from global_models import climatology_on_grid,anomaly_map
+
+BASE="https://opendata.dwd.de/weather/nwp/v1/m/icon-d2-ruc/p"
+HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.20 (educational)"}
+PARAMS={
+    "MSLP":("PMSL",None,None),
+    "T850":("T",100,85000),
+    "T850 + MSLP":("T",100,85000),
+    "T2":("T_2M",None,None),
+    "Z500 + MSLP":("FI",100,50000),
+    "Schneehöhe":("H_SNOW",None,None),
+    "Windböen":("VMAX_10M",None,None),
+    "Niederschlagssumme":("TOT_PREC",None,None),
+    "Niederschlagsrate":("TOT_PREC",None,None),
+    "CAPE":("CAPE_ML",None,None),
+    "Simulierte Radarreflektivität":("DBZ_CMAX",None,None),
+}
+def url(run,lead,param,level_type=None,level=None):
+    root=f"{BASE}/{quote(param,safe='')}"
+    if level_type is not None:
+        root+=f"/lvt1/{level_type}/lv1/{level}"
+    stamp=quote(run.strftime("%Y-%m-%dT%H:00"),safe="-T")
+    return f"{root}/r/{stamp}/s/PT{lead:03d}H00M.grib2"
+
+@st.cache_data(ttl=900,show_spinner=False)
+def download(url):
+    response=requests.get(url,headers=HEADERS,timeout=100)
+    response.raise_for_status()
+    if not response.content.startswith(b"GRIB"):
+        raise RuntimeError("DWD hat keine GRIB2-Datei geliefert.")
+    return response.content
+
+@st.cache_data(ttl=3600,show_spinner=False)
+def coordinates(run):
+    coords=[]
+    for param in ("CLAT","CLON"):
+        raw=download(url(run,0,param))
+        vals,_,_=grib_values(raw)
+        coords.append(vals)
+    lat,lon=coords
+    # ICON native CLAT/CLON are often in radians.
+    if np.nanmax(np.abs(lat))<2:lat=np.rad2deg(lat)
+    if np.nanmax(np.abs(lon))<7:lon=np.rad2deg(lon)
+    if len(lat)!=len(lon) or np.nanmax(np.abs(lat))>90:
+        raise RuntimeError("DWD-Gitterkoordinaten sind ungültig.")
+    return lat,lon
+
+def grib_values(raw):
+    path=None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".grib2",delete=False) as f:
+            f.write(raw);path=f.name
+        with open(path,"rb") as stream:
+            gid=codes_grib_new_from_file(stream)
+            if gid is None:raise RuntimeError("Leere GRIB-Datei.")
+            try:
+                vals=np.asarray(codes_get_array(gid,"values"),dtype=float)
+                units=str(codes_get(gid,"units"))
+                valid=None
+                try:
+                    valid=(int(codes_get(gid,"validityDate")),int(codes_get(gid,"validityTime")))
+                except Exception:pass
+                return vals,units,valid
+            finally:codes_release(gid)
+    finally:
+        if path and os.path.exists(path):os.unlink(path)
+
+@st.cache_data(ttl=900,show_spinner=False)
+def field(run,lead,parameter,region):
+    param,level_type,level=PARAMS[parameter]
+    raw=download(url(run,lead,param,level_type,level))
+    vals,units,valid=grib_values(raw)
+    lat,lon=coordinates(run)
+    if len(vals)!=len(lat):
+        raise RuntimeError("ICON-D2-RUC-Werte und Gitter passen nicht zusammen.")
+    west,east,south,north=REGIONS[region]
+    mask=(lat>=south-.7)&(lat<=north+.7)&(lon>=west-.7)&(lon<=east+.7)&np.isfinite(vals)&(np.abs(vals)<9000)
+    if mask.sum()<20:raise RuntimeError("Keine gültigen RUC-Daten für das Kartengebiet.")
+    if param in ("T","T_2M"):vals=vals-273.15
+    elif param=="PMSL":vals=vals/100
+    elif param=="H_SNOW":vals=vals*100
+    elif param=="VMAX_10M":vals=vals*3.6
+    elif param=="FI":
+        vals=vals/(9.80665*10) if "m2" in units.replace(" ","").lower() else vals/10
+    nx,ny=(225,180) if region=="Deutschland" else (300,220)
+    X,Y=np.meshgrid(np.linspace(west,east,nx),np.linspace(south,north,ny))
+    points=np.column_stack((lon[mask],lat[mask]))
+    Z=griddata(points,vals[mask],(X,Y),method="linear")
+    if not np.isfinite(Z).all():
+        near=griddata(points,vals[mask],(X,Y),method="nearest")
+        Z=np.where(np.isfinite(Z),Z,near)
+    return X,Y,Z
+
+def recent_runs():
+    cutoff=datetime.now(timezone.utc)-timedelta(minutes=55)
+    latest=cutoff.replace(minute=0,second=0,microsecond=0)
+    return [latest-timedelta(hours=i) for i in range(8)]
+
+def show(region):
+    st.subheader(f"ICON-D2-RUC · {region}")
+    st.caption("DWD Open Data v1 · stündliche Modellläufe · bis +27 h · native ICON-Gitterdaten. Kein Open-Meteo.")
+    runs=recent_runs()
+    run=st.selectbox("Modelllauf (UTC)",runs,format_func=lambda d:f"{d:%d.%m.%Y %H} UTC",key="ruc_run")
+    lead=st.select_slider("Vorhersagestunde",options=list(range(28)),value=6,
+        format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",key="ruc_lead")
+    parameter=st.radio("Parameter",list(PARAMS)+["MSLP-Anomalie"],horizontal=True,key="ruc_param")
+    if parameter=="Niederschlagsrate":
+        st.caption("Mittlere Niederschlagsrate aus zwei aufeinanderfolgenden Stundenakkumulationen (mm/h).")
+    if st.button("RUC-Karte berechnen",type="primary",key="ruc_generate"):
+        try:
+            with st.spinner("DWD-RUC-Originaldaten laden …"):
+                target="MSLP" if parameter=="MSLP-Anomalie" else parameter
+                X,Y,Z=field(run,lead,target,region)
+                valid=run+timedelta(hours=lead)
+                if parameter=="Niederschlagsrate":
+                    if lead==0:Z=np.zeros_like(Z)
+                    else:
+                        previous=field(run,lead-1,"Niederschlagssumme",region)[2]
+                        if np.nanmin(Z-previous)<-.1:raise RuntimeError("Niederschlagssumme ist nicht monoton.")
+                        Z=np.maximum(0,Z-previous)
+                if parameter=="MSLP-Anomalie":
+                    png=anomaly_map(X,Y,Z,climatology_on_grid(X,Y,valid.month),region,"ICON-D2-RUC",run,valid)
+                else:
+                    pressure=field(run,lead,"MSLP",region)[2] if parameter in ("T850 + MSLP","Z500 + MSLP") else None
+                    name={"T2":"2-m-Temperatur","CAPE":"CAPE","Simulierte Radarreflektivität":"Simulierte Radarreflektivität"}.get(parameter,parameter)
+                    png=render(X,Y,Z,region,name,run,valid,model="ICON-D2-RUC",mslp=pressure)
+                st.session_state["ruc_map"]=(region,run,lead,parameter,valid,png)
+        except Exception as exc:
+            st.error(f"DWD-RUC-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}")
+    result=st.session_state.get("ruc_map")
+    if result and result[:4]==(region,run,lead,parameter):
+        st.image(result[5],use_container_width=True)
+        st.download_button("PNG herunterladen",result[5],file_name=f"ELBTAL_ICON-D2-RUC_{parameter}_{result[4]:%Y%m%d%H}.png",mime="image/png")
