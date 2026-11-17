@@ -97,6 +97,41 @@ def gefs_point(run,step,member,field,lat,lon):
     return read_point(response.content,lat,lon,field)
 
 @st.cache_data(ttl=3600,show_spinner=False)
+def gfs_main_point(run,step,field,lat,lon):
+    """Independent deterministic GFS run, not the GEFS control member."""
+    specs={
+        "msl":("PRMSL","mean_sea_level"),
+        "t850":("TMP","850_mb"),
+        "t2":("TMP","2_m_above_ground"),
+        "precip":("APCP","surface"),
+        "snow":("SNOD","surface"),
+    }
+    variable,level=specs[field]
+    params={"file":f"gfs.t{run:%H}z.pgrb2.0p25.f{step:03d}",
+            "dir":f"/gfs.{run:%Y%m%d}/{run:%H}/atmos",
+            f"var_{variable}":"on",f"lev_{level}":"on",
+            "subregion":"","leftlon":round(lon-1.1,3),"rightlon":round(lon+1.1,3),
+            "toplat":round(lat+1.1,3),"bottomlat":round(lat-1.1,3)}
+    response=requests.get("https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl",
+                          params=params,headers=HEADERS,timeout=45)
+    response.raise_for_status()
+    return read_point(response.content,lat,lon,field)
+
+
+def fetch_gfs_main(run,field,lat,lon,steps):
+    """Fetch deterministic GFS in parallel; gaps remain NaN."""
+    result=np.full(len(steps),np.nan)
+    failures=[]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures={pool.submit(gfs_main_point,run,step,field,lat,lon):i
+                 for i,step in enumerate(steps)}
+        for future in as_completed(futures):
+            try:result[futures[future]]=future.result()
+            except Exception as exc:failures.append(str(exc))
+    return result,failures
+
+
+@st.cache_data(ttl=3600,show_spinner=False)
 def ecmwf_step(run,step,field,lat,lon):
     from ecmwf.opendata import Client
     client=Client(source="ecmwf",model="ifs",resol="0p25")
@@ -150,7 +185,7 @@ def fetch(model,run,field,lat,lon,steps):
             except Exception as exc:failures.append(str(exc))
     return data,failures
 
-def draw(model,place,run,field,steps,data,precip=None):
+def draw(model,place,run,field,steps,data,precip=None,main=None):
     from matplotlib.ticker import MaxNLocator
     from matplotlib.patches import FancyBboxPatch, Arc
     from matplotlib.lines import Line2D
@@ -165,7 +200,9 @@ def draw(model,place,run,field,steps,data,precip=None):
     mean=np.nanmean(data,axis=0)
     ax.plot(times,mean,color="white",lw=3,label="Mittelwert",zorder=6)
     if model=="GEFS" and np.isfinite(data[0]).any():
-        ax.plot(times,data[0],color="#41F277",lw=2.3,label="Kontrolllauf",zorder=7)
+        ax.plot(times,data[0],color="#2196FF",lw=2.8,label="Kontrolllauf",zorder=8)
+    if main is not None and np.isfinite(main).any():
+        ax.plot(times,main,color="#41F277",lw=2.8,label="GFS-Hauptlauf",zorder=9)
     ax.grid(color="#6C8BA5",alpha=.3,linestyle="--")
     ax.tick_params(colors="#D9E8F6",labelsize=10)
     for spine in ax.spines.values():spine.set_color("#5CA8D4")
@@ -219,7 +256,9 @@ def draw(model,place,run,field,steps,data,precip=None):
     # Full P01-P30 legend, with a separate control and ensemble mean.
     handles=[Line2D([0],[0],color=COLORS[i%len(COLORS)],lw=1.8,
                      label=f"P{i:02d}") for i in range(1,(31 if model=="GEFS" else 51))]
-    handles.extend([Line2D([0],[0],color="#41F277",lw=2.8,label="CONTROL")] if model=="GEFS" else [])
+    handles.extend([Line2D([0],[0],color="#2196FF",lw=2.8,label="CONTROL")] if model=="GEFS" else [])
+    if main is not None and np.isfinite(main).any():
+        handles.append(Line2D([0],[0],color="#41F277",lw=2.8,label="GFS HAUPTLAUF"))
     handles.append(Line2D([0],[0],color="white",lw=3,label="AVG"))
     legend=fig.legend(handles=handles,loc="lower center",
              bbox_to_anchor=(.5,.115),ncol=11 if model=="GEFS" else 13,
@@ -281,7 +320,13 @@ def show():
                 if not available.any():
                     raise RuntimeError("Keine gültigen Ensemble-Daten erhalten. Bitte einen älteren Modelllauf auswählen.")
                 # Missing points remain NaN; never substitute invented values.
-                png=draw(model,place,run,FIELDS[parameter],steps,values,precipitation)
+                main=None
+                if model=="GEFS":
+                    main,main_errors=fetch_gfs_main(run,FIELDS[parameter],lat,lon,steps)
+                    errors+=main_errors
+                    if parameter=="Neuschnee":
+                        main=np.maximum(np.diff(main,prepend=np.nan),0)
+                png=draw(model,place,run,FIELDS[parameter],steps,values,precipitation,main=main)
                 st.session_state["ens_manual_result"]=(selection,png,float(available.mean()),len(errors))
         except Exception as exc:
             st.session_state.pop("ens_manual_result",None)
