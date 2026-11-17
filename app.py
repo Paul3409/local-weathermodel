@@ -642,9 +642,14 @@ st.markdown(
     '🔄 App vollständig neu laden</a>',
     unsafe_allow_html=True,
 )
-from v2_navigation import show as show_v2_navigation
-if show_v2_navigation():
-    st.stop()
+# Streamlit can retain imported Python modules across script reruns and
+# deployments. Reload the navigation module so an updated menu takes effect
+# even when the app process has not restarted.
+import importlib as _elbtal_importlib
+import v2_navigation as _elbtal_navigation
+_elbtal_importlib.reload(_elbtal_navigation)
+_elbtal_navigation.show()
+st.stop()
 map_region = st.segmented_control('Lokales Kartengebiet', options=['Elbtal','KRUMET'], default='Elbtal', selection_mode='single')
 if map_region == '📊 Ensembles':
     from ensembles import show as show_ensembles
