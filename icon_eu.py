@@ -440,16 +440,30 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         ax.pcolormesh(X,Y,np.ma.masked_where(~ocean_mask,np.ones(Z.shape)),cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
         label="Schneehöhe (cm)" if parameter=="Schneehöhe" else "Berechnete Neuschneehöhe seit Modellstart (cm; 10:1-Schätzung bei ICON)"
     elif parameter=="Z500 + MSLP":
-        from matplotlib.colors import LinearSegmentedColormap, Normalize
-        if mslp is None or mslp.shape!=Z.shape: raise RuntimeError("MSLP-Raster fehlt.")
-        anchors=[(480,"#65058C"),(490,"#8500F4"),(500,"#0033E9"),(510,"#008FF7"),
-                 (520,"#00D6EC"),(530,"#00DF81"),(540,"#44E000"),(550,"#E7F500"),
-                 (560,"#FFE600"),(570,"#FFAD00"),(580,"#FF5900"),(590,"#F10B12"),(600,"#DB008D")]
-        cmap=LinearSegmentedColormap.from_list("elbtal_z500",[((v-480)/120,c) for v,c in anchors],N=512)
-        im=ax.contourf(X,Y,Z,levels=np.linspace(480,600,241),cmap=cmap,norm=Normalize(480,600),extend="both")
-        if not np.isfinite(mslp).all() or not 850<np.nanmedian(mslp)<1100:
+        from matplotlib.colors import LinearSegmentedColormap, ListedColormap, BoundaryNorm
+        if mslp is None or mslp.shape!=Z.shape:
+            raise RuntimeError("MSLP-Raster fehlt oder hat eine andere Gittergröße.")
+        # Muted Z500 palette with a REAL discontinuity at 552 gpdam:
+        # 551.999 -> green, 552.000 -> yellow. No interpolation across it.
+        lower=LinearSegmentedColormap.from_list("z500_cool_v2",[
+            (0.0,"#503A79"),(.20,"#455D9D"),(.40,"#427EAF"),
+            (.60,"#4A9CB1"),(.78,"#429E83"),(1.0,"#639C56")])
+        upper=LinearSegmentedColormap.from_list("z500_warm_v2",[
+            (0.0,"#E6CE69"),(.25,"#DDB45D"),(.50,"#D68E53"),
+            (.75,"#C66C59"),(1.0,"#A95172")])
+        # Each one-gpdam interval has its own color. The 552 boundary is
+        # shared by both map contours and the colorbar (no blended band).
+        levels=np.arange(480,601,1,dtype=float)
+        colors=[lower((v-480)/72) for v in range(480,552)]
+        colors += [upper((v-552)/48) for v in range(552,600)]
+        cmap=ListedColormap(colors,name="elbtal_z500_v2_552_split")
+        norm=BoundaryNorm(levels,cmap.N)
+        im=ax.contourf(X,Y,Z,levels=levels,cmap=cmap,norm=norm,extend="both")
+        pressure=np.ma.masked_invalid(mslp)
+        finite_pressure=pressure.compressed()
+        if finite_pressure.size==0 or not 850<float(np.median(finite_pressure))<1100:
             raise RuntimeError("MSLP-Werte für Isobaren ungültig.")
-        lines=ax.contour(X,Y,mslp,levels=np.arange(940,1081,4),colors="#19243A",linewidths=.85,alpha=.9)
+        lines=ax.contour(X,Y,pressure,levels=np.arange(940,1081,4),colors="#19243A",linewidths=.85,alpha=.9)
         ax.clabel(lines,inline=True,fontsize=6,fmt="%d")
         # Standard 552-gpdam contour (500-hPa geopotential), not a sea-level isobar.
         if float(np.nanmin(Z)) <= 552 <= float(np.nanmax(Z)):
@@ -601,7 +615,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     elif parameter in ("Neuschneemenge","Schneehöhe"):
         cb.set_ticks([.1,1,5,10,20,30,50,75,100,150])
     elif parameter=="Z500 + MSLP":
-        cb.set_ticks(np.arange(480,601,10))
+        cb.set_ticks(sorted(set(np.arange(480,601,10).tolist()+[552])))
     elif parameter in ("T850","T850 + MSLP"):
         cb.set_ticks(np.arange(-30,31,5))
     elif parameter=="MSLP":
