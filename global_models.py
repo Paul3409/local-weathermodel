@@ -287,4 +287,4 @@ def show(region, forced_model=None, forced_parameter=None):
     result=st.session_state.get("global_map")
     if result and result[:5]==(model,region,run,lead,parameter):
         st.image(result[6],use_container_width=True)
-        st.download_button("PNG herunterladen",result[6],file_name=f"ELBTAL_{model.replace(' ','_')}_{result[5]:%Y%m%d%H}_{lead:03d}.png",mime="image/png")
+        st.download_button("PNG herunterladen",result[6],file_name=f"MeteoOst_{model.replace(' ','_')}_{result[5]:%Y%m%d%H}_{lead:03d}.png",mime="image/png")
