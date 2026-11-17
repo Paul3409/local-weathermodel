@@ -15,7 +15,7 @@ from global_models import decode, climatology_on_grid, anomaly_map
 from model_cycles import recent_cycles
 
 ROOT = "https://nomads.ncep.noaa.gov/pub/data/nccf/com"
-HEADERS = {"User-Agent": "ELBTAL-Wetterkarten/1.20 (educational)"}
+HEADERS = {"User-Agent": "MeteoOst-Wetterkarten/1.20 (educational)"}
 FIELDS = {
     "MSLP": ("sfc", "PRMSL", "mean sea level", "msl"),
     "T850": ("pres", "TMP", "850 mb", "t"),
