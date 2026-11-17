@@ -44,8 +44,8 @@ HYMEC_COLORS = (
     "#74108F", "#075B25", "#258EEB", "#1646A8",
 )
 HYMEC_NAMES = (
-    "Kein Niederschlag", "Nicht klassifiziert", "Sprühregen",
-    "Regen", "Gefr. Sprühregen", "Gefrierender Regen", "Schneeregen",
+    "Kein Niederschlag", "Nicht klassifiziert", "Regen (leicht)",
+    "Regen (mäßig)", "Gefr. Sprühregen", "Gefrierender Regen", "Schneeregen",
     "Schnee (leicht)", "Graupel", "Hagel", "Großer Hagel",
     "Regen (stark)", "Schnee (mittel)", "Schnee (stark)",
 )
