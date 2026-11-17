@@ -1,4 +1,4 @@
-"""ELBTAL V2 navigation: mobile-friendly popover menus without search input.
+"""MeteoOst V2 navigation: mobile-friendly popover menus without search input.
 
 Only valid model/region/parameter combinations are offered. Existing
 radar, ensemble meteograms and local products remain separate.
