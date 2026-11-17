@@ -43,11 +43,37 @@ def _cache_file(model,place,field,run):
     return CACHE_ROOT/slug(model)/run.strftime("%Y%m%d%H")/slug(place)/f"{field}.npz"
 
 
-def fetch_cached(model,place,run,field,lat,lon,steps):
-    """Keep verified point values between Actions runs; only download missing GRIBs.
 
-    Files are committed alongside PNGs. A failed download is kept as NaN and
-    retried next scheduled run, never replaced with a synthetic observation.
+def _persist_gefs_cache(cache_path,steps,data):
+    """Merge completed points atomically, including older/longer lead times."""
+    known={}
+    if cache_path.is_file():
+        try:
+            with np.load(cache_path,allow_pickle=False) as saved:
+                old_steps=saved["steps"].astype(int)
+                old_data=saved["data"]
+                if old_data.shape==(31,len(old_steps)):
+                    known={int(h):old_data[:,j].copy() for j,h in enumerate(old_steps)}
+        except (ValueError,KeyError,OSError,EOFError) as exc:
+            print(f"CACHE RESET {cache_path}: {exc}")
+    for j,hour in enumerate(steps):
+        if int(hour) not in known:
+            known[int(hour)]=np.full(31,np.nan,dtype=np.float32)
+        mask=np.isfinite(data[:,j])
+        known[int(hour)][mask]=data[mask,j]
+    ordered=sorted(known)
+    values=np.column_stack([known[hour] for hour in ordered]).astype(np.float32)
+    cache_path.parent.mkdir(parents=True,exist_ok=True)
+    temporary=cache_path.with_suffix(".tmp.npz")
+    np.savez_compressed(temporary,steps=np.array(ordered,dtype=np.int16),data=values)
+    temporary.replace(cache_path)
+
+
+def fetch_cached(model,place,run,field,lat,lon,steps):
+    """Incrementally cache real GEFS point values across hourly workflow runs.
+
+    Each batch is saved even when NOAA misses some fields. Missing data remain
+    NaN and will be retried; no made-up values or interpolation.
     """
     if model!="GEFS":
         from ensembles import fetch
@@ -61,10 +87,10 @@ def fetch_cached(model,place,run,field,lat,lon,steps):
                 old_steps=saved["steps"].astype(int)
                 old_data=saved["data"]
                 if old_data.shape==(31,len(old_steps)):
-                    positions={int(hour):index for index,hour in enumerate(old_steps)}
+                    lookup={int(hour):index for index,hour in enumerate(old_steps)}
                     for j,hour in enumerate(steps):
-                        if hour in positions:
-                            data[:,j]=old_data[:,positions[hour]]
+                        if hour in lookup:
+                            data[:,j]=old_data[:,lookup[hour]]
         except (ValueError,KeyError,OSError,EOFError) as exc:
             print(f"CACHE RESET {cache_path}: {exc}")
     missing=[(i,j) for j in range(len(steps)) for i in range(31)
@@ -72,43 +98,20 @@ def fetch_cached(model,place,run,field,lat,lon,steps):
     errors=[]
     if missing:
         print(f"FETCH {model} {field} +{steps[-1]}h: {len(missing)} missing of {data.size}",flush=True)
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            futures={pool.submit(gefs_point,run,steps[j],i,field,lat,lon):(i,j)
-                     for i,j in missing}
-            for future in as_completed(futures):
-                i,j=futures[future]
-                try:data[i,j]=future.result()
-                except Exception as exc:
-                    errors.append(f"+{steps[j]}h P{i:02d}: {exc}")
-        # Keep previously fetched longer-range steps when generating shorter products.
-        if cache_path.is_file():
-            try:
-                with np.load(cache_path,allow_pickle=False) as saved:
-                    old_steps=saved["steps"].astype(int)
-                    old_data=saved["data"]
-                    merged_steps=sorted(set(map(int,old_steps)).union(steps))
-                    merged=np.full((31,len(merged_steps)),np.nan)
-                    lookup={int(h):idx for idx,h in enumerate(old_steps)}
-                    for j,h in enumerate(merged_steps):
-                        if h in lookup:merged[:,j]=old_data[:,lookup[h]]
-                    merged_lookup={int(h):j for j,h in enumerate(merged_steps)}
-                    for j,h in enumerate(steps):
-                        finite=np.isfinite(data[:,j])
-                        merged[finite,merged_lookup[h]]=data[finite,j]
-                    save_steps=merged_steps
-                    save_data=merged
-            except (ValueError,KeyError,OSError,EOFError):
-                save_steps=steps
-                save_data=data
-        else:
-            save_steps=steps
-            save_data=data
-        cache_path.parent.mkdir(parents=True,exist_ok=True)
-        temporary=cache_path.with_suffix(".tmp.npz")
-        np.savez_compressed(temporary,steps=np.array(save_steps,dtype=np.int16),
-                            data=save_data.astype(np.float32))
-        temporary.replace(cache_path)
-        print(f"CACHED {field} {run:%Y%m%d%H}: {np.isfinite(data).mean():.1%} usable",flush=True)
+        # Persist regularly so a worker time limit does not waste all progress.
+        for start in range(0,len(missing),96):
+            batch=missing[start:start+96]
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures={pool.submit(gefs_point,run,steps[j],i,field,lat,lon):(i,j)
+                         for i,j in batch}
+                for future in as_completed(futures):
+                    i,j=futures[future]
+                    try:data[i,j]=future.result()
+                    except Exception as exc:
+                        errors.append(f"+{steps[j]}h P{i:02d}: {exc}")
+            _persist_gefs_cache(cache_path,steps,data)
+            print(f"CACHED {field} {run:%Y%m%d%H}: {np.isfinite(data).mean():.1%} "
+                  f"({min(start+len(batch),len(missing))}/{len(missing)} checked)",flush=True)
     return data,errors
 
 
