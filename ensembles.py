@@ -300,73 +300,41 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
     return out.getvalue()
 
 def show():
+    """Instant display of already published diagrams, without model downloads."""
+    from ensemble_archive import available_images
     st.subheader("📊 ELBTAL · Ensemble-Diagramme")
     model=st.segmented_control("Ensemble",["GEFS","ECMWF ENS"],default="GEFS",key="ens_model")
     place=st.selectbox("Ort",list(PLACES),key="ens_place")
     parameter=st.selectbox("Parameter",list(FIELDS),key="ens_param")
-    run=st.selectbox("Vier letzte berechnete Modellzyklen (UTC)",runs(model),format_func=lambda x:x.strftime("%d.%m.%Y %H UTC"),key="ens_run")
-    st.caption("UTC bezeichnet die Modellinitialisierung. Die neuesten Zyklen werden erst nach einer Bereitstellungsfrist angeboten; einzelne Prognosedaten können dennoch fehlen.")
-    horizon=st.select_slider("Prognosezeitraum",options=[48,96,144,192,240,288,336,384] if model=="GEFS" else [48,96,144,192,240,288,336,360] if run.hour in (0,12) else [48,96,144],value=384 if model=="GEFS" else 360,key="ens_horizon")
-    # Every member and every parameter uses native 6-hourly forecast steps.
-    # In particular, T2 must retain the diurnal temperature cycle.
-    steps=list(range(0,horizon+1,6))
-    lat,lon=PLACES[place]
-    st.caption(f"6-Stunden-Auflösung über den gesamten Zeitraum · {len(steps)} Zeitpunkte je Mitglied. GEFS: 30 + Kontrolllauf; ECMWF ENS: 50. Lange Zeiträume können beim ersten Abruf deutlich länger dauern.")
-    if parameter=="Neuschnee":
-        st.info("GEFS: positiver Schneehöhenzuwachs aus SNOD (cm), keine direkte Neuschneemessung. ECMWF: Schneefall-Wasseräquivalent (mm), keine Umrechnung in Schneehöhe.")
-    # PNGs are produced by GitHub Actions. Streamlit performs no model downloads.
-    import hashlib
-    from urllib.parse import quote
-    from pathlib import Path
-    from PIL import Image
-    from ensemble_archive import image_path
-    archive_path=image_path(model,place,parameter,run,horizon)
-    selection=(model,place,parameter,run.isoformat(),horizon)
-    if archive_path.is_file():
-        st.image(str(archive_path),use_container_width=True)
-        st.download_button("PNG herunterladen",archive_path.read_bytes(),
-                           file_name=archive_path.name,mime="image/png")
+    available=available_images(model,place,parameter)
+    if not available:
+        st.info("Für diese Auswahl ist noch kein vorab berechnetes Ensemble veröffentlicht. "
+                "Die automatische GitHub-Aktion bereitet neue Diagramme unabhängig von deinem Besuch vor.")
+        st.caption("Es wird bewusst kein unvollständiger oder erfundener Modelllauf angezeigt. "
+                   "Als erste automatische Auswahl wird GEFS für Mühlberg (Elbe) vorbereitet.")
+        return
+
+    archived_runs=list(dict.fromkeys(item[0] for item in available))
+    run=st.selectbox("Verfügbare Modellläufe (UTC)",archived_runs,
+                     format_func=lambda value:value.strftime("%d.%m.%Y · %H UTC"),
+                     key="ens_archive_run")
+    horizons=sorted({item[1] for item in available if item[0]==run},reverse=True)
+    horizon=st.selectbox("Verfügbare Prognosezeiträume",horizons,
+                         format_func=lambda hours:f"+{hours} Stunden",
+                         key="ens_archive_horizon")
+    result=next((path for cycle,hours,path in available if cycle==run and hours==horizon),None)
+    if result is None:
+        st.warning("Die gewünschte Archivdatei ist nicht vorhanden.")
+        return
+    latest=archived_runs[0]
+    if run==latest:
+        st.caption(f"Neuester veröffentlichter und tatsächlich vorhandener Modelllauf: "
+                   f"{run:%d.%m.%Y · %H} UTC · +{horizon} h")
     else:
-        st.info("Für diese Auswahl liegt noch kein vorab berechnetes Ensemble vor.")
-    st.caption("Manuelle Berechnung lädt Originaldaten von NOAA bzw. ECMWF. Besonders GEFS mit vielen Mitgliedern kann mehrere Minuten benötigen.")
-    if st.button("📈 Ensemble jetzt berechnen & anzeigen",type="primary",use_container_width=True,key="ens_calculate"):
-        try:
-            with st.spinner("Ensemble-Daten abrufen und Diagramm zeichnen …"):
-                values,errors=fetch(model,run,FIELDS[parameter],lat,lon,steps)
-                if parameter=="Neuschnee":
-                    values=np.maximum(np.diff(values,axis=1,prepend=np.nan),0)
-                precipitation=None
-                if parameter=="T2 + Niederschlag":
-                    precipitation,extra_errors=fetch(model,run,"precip",lat,lon,steps)
-                    errors+=extra_errors
-                available=np.isfinite(values)
-                if not available.any():
-                    raise RuntimeError("Keine gültigen Ensemble-Daten erhalten. Bitte einen älteren Modelllauf auswählen.")
-                # Avoid presenting severely incomplete ensemble runs as forecasts.
-                if available.mean()<0.80 or (available.mean(axis=0)<0.65).any():
-                    examples="; ".join(dict.fromkeys(errors[:3]))
-                    raise RuntimeError(f"Nur {available.mean():.0%} Ensemble-Daten vorhanden. "
-                                       f"Diagramm aus Qualitätsgründen nicht gezeichnet. "
-                                       f"Fehlerbeispiele: {examples[:450]}")
-                # Missing points remain NaN; never substitute invented values.
-                main=None
-                if model=="GEFS":
-                    main,main_errors=fetch_gfs_main(run,FIELDS[parameter],lat,lon,steps)
-                    errors+=main_errors
-                    if parameter=="Neuschnee":
-                        main=np.maximum(np.diff(main,prepend=np.nan),0)
-                if main is not None and np.isfinite(main).mean()<0.70:
-                    st.warning("GFS-Hauptlauf unvollständig; grüne Linie wird nur an vorhandenen Zeitpunkten gezeigt.")
-                png=draw(model,place,run,FIELDS[parameter],steps,values,precipitation,main=main)
-                st.session_state["ens_manual_result"]=(selection,png,float(available.mean()),len(errors))
-        except Exception as exc:
-            st.session_state.pop("ens_manual_result",None)
-            st.error(f"Berechnung fehlgeschlagen: {exc}")
-    manual=st.session_state.get("ens_manual_result")
-    if manual is not None and manual[0]==selection:
-        _,png,coverage,error_count=manual
-        st.image(png,caption=f"Manuell berechnet · Datenabdeckung {coverage:.1%}",use_container_width=True)
-        if error_count:
-            st.warning(f"{error_count} Datenabrufe fehlgeschlagen; fehlende Werte bleiben als Lücken sichtbar.")
-        st.download_button("Berechnetes Ensemble als PNG herunterladen",png,
-                           file_name="ELBTAL_Ensemble_manuell.png",mime="image/png",key="ens_manual_download")
+        st.caption(f"Archivlauf: {run:%d.%m.%Y · %H} UTC · +{horizon} h. "
+                   f"Neuester verfügbarer Lauf: {latest:%d.%m.%Y · %H} UTC.")
+    st.image(str(result),use_container_width=True)
+    st.download_button("Ensemble als PNG herunterladen",result.read_bytes(),
+                       file_name=result.name,mime="image/png",key="ens_archive_download")
+    st.caption("NOAA/ECMWF-Originaldaten · vorab berechnete ELBTAL-Grafik. "
+               "Neue Modellläufe erscheinen automatisch nach der Veröffentlichung durch den GitHub-Workflow.")
