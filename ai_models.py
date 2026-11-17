@@ -72,18 +72,18 @@ def field(model,run,lead,parameter,region):
         code="apcp"
     return decode(raw,run+timedelta(hours=lead),REGIONS[region],code)
 
-def show(region,forced_model=None):
+def show(region,forced_model=None,forced_parameter=None):
     st.subheader(f"NOAA KI-Wettermodelle · {region}")
     model=forced_model or st.segmented_control("Modell",["AIGFS","AIGEFS Mittel"],default="AIGFS",key="ai_model")
     st.caption("Originaldaten NOAA NOMADS · AIGEFS Mittel = räumliche Karten des Ensemblemittels, keine Diagramme. Kein Open-Meteo.")
-    runs=recent_cycles(model,count=6)
+    runs=recent_cycles(model,count=9)
     run=st.selectbox("Modelllauf (UTC)",runs,format_func=lambda x:f"{x:%d.%m.%Y %H} UTC",key="ai_run_"+model)
     lead=st.select_slider("Vorhersagestunde",options=list(range(0,385,6)),value=24,
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="ai_lead_"+model)
     parameters=["MSLP","T850","T2"] if model=="AIGEFS Mittel" else [
         "MSLP","T850","T850 + MSLP","T2","Z500 + MSLP","MSLP-Anomalie","Niederschlagssumme"]
-    parameter=st.radio("Parameter",parameters,horizontal=True,key="ai_param_"+model)
+    parameter=forced_parameter if forced_parameter in parameters else st.radio("Parameter",parameters,horizontal=True,key="ai_param_"+model)
     if st.button("KI-Wetterkarte berechnen",type="primary",key="ai_generate_"+model):
         try:
             with st.spinner("NOAA-Originaldaten laden und Wetterkarte erstellen …"):
