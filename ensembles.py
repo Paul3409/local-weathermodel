@@ -315,6 +315,14 @@ def show():
         return
 
     archived_runs=list(dict.fromkeys(item[0] for item in available))
+    # Switch to a newly published run automatically, even if Streamlit
+    # preserved the previously selected (now older) run in session state.
+    newest=archived_runs[0]
+    if (st.session_state.get("ens_archive_latest_seen") != newest or
+            st.session_state.get("ens_archive_run") not in archived_runs):
+        st.session_state["ens_archive_run"]=newest
+        st.session_state.pop("ens_archive_horizon",None)
+    st.session_state["ens_archive_latest_seen"]=newest
     run=st.selectbox("Verfügbare Modellläufe (UTC)",archived_runs,
                      format_func=lambda value:value.strftime("%d.%m.%Y · %H UTC"),
                      key="ens_archive_run")
