@@ -4,6 +4,7 @@ Only valid model/region/parameter combinations are offered. Existing
 radar, ensemble meteograms and local products remain separate.
 """
 import streamlit as st
+from contextlib import contextmanager
 
 ALL_REGIONS = ["Deutschland", "Mitteleuropa", "Europa & Nordatlantik"]
 SYNOPTIC = ["MSLP", "T850", "T850 + MSLP", "Z500 + MSLP"]
@@ -46,25 +47,43 @@ def dropdown(title, key, options):
                 st.rerun()
     return st.session_state[key]
 
+@contextmanager
+def collect_explanations():
+    """Place informational captions below the weather map."""
+    original = st.caption
+    notes = []
+    def collect(message, *args, **kwargs):
+        notes.append(str(message))
+    st.caption = collect
+    try:
+        yield notes
+    finally:
+        st.caption = original
+
+
 def show_model_maps():
     st.subheader("🌍 Wettermodelle")
     model=dropdown("1. Modell", "v2_model", list(CAPABILITIES))
     regions=list(CAPABILITIES[model])
     region=dropdown("2. Region", "v2_region", regions)
     parameter=dropdown("3. Parameter", "v2_parameter", CAPABILITIES[model][region])
-    st.caption("Nur für dieses Modell unterstützte Regionen und Parameter. Die tatsächliche Dateiverfügbarkeit wird beim Abruf geprüft.")
-    if model=="ICON-D2-RUC":
-        from icon_d2_ruc import show
-        show(region, forced_parameter=parameter)
-    elif model in ("AIGFS","AIGEFS Mittel"):
-        from ai_models import show
-        show(region, forced_model=model, forced_parameter=parameter)
-    elif model in ("ECMWF IFS","GEFS Mittel"):
-        from global_models import show
-        show(region, forced_model=model, forced_parameter=parameter)
-    else:
-        from icon_eu import show
-        show(region, forced_model=model, forced_parameter=parameter)
+    with collect_explanations() as notes:
+        if model=="ICON-D2-RUC":
+            from icon_d2_ruc import show
+            show(region, forced_parameter=parameter)
+        elif model in ("AIGFS","AIGEFS Mittel"):
+            from ai_models import show
+            show(region, forced_model=model, forced_parameter=parameter)
+        elif model in ("ECMWF IFS","GEFS Mittel"):
+            from global_models import show
+            show(region, forced_model=model, forced_parameter=parameter)
+        else:
+            from icon_eu import show
+            show(region, forced_model=model, forced_parameter=parameter)
+    with st.expander("ℹ️ Modellinformationen & Hinweise", expanded=False):
+        st.caption("Regionen und Parameter sind modellabhängig. Die tatsächliche Dateiverfügbarkeit wird beim Abruf geprüft.")
+        for note in dict.fromkeys(notes):
+            st.caption(note)
 
 def show():
     st.caption("ELBTAL V2 · zentrale Navigation")
