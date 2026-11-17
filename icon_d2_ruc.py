@@ -141,8 +141,8 @@ def show(region,forced_parameter=None):
     if forced_parameter is None:
         st.subheader(f"ICON-D2-RUC · {region}")
     st.caption("DWD Open Data v1 · stündliche Modellläufe · bis +27 h · native ICON-Gitterdaten. Kein Open-Meteo.")
-    runs=recent_runs()
-    run=st.selectbox("Modelllauf (UTC)",runs,format_func=lambda d:f"{d:%d.%m.%Y %H} UTC",key="ruc_run")
+    from v2_model_runs import run_picker
+    run=run_picker("ICON-D2-RUC","ruc_run")
     lead=st.select_slider("Vorhersagestunde",options=list(range(28)),value=6,
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",key="ruc_lead")
     parameter=forced_parameter if forced_parameter in (list(PARAMS)+["MSLP-Anomalie"]) else st.radio("Parameter",list(PARAMS)+["MSLP-Anomalie"],horizontal=True,key="ruc_param")
