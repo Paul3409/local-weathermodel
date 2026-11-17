@@ -813,16 +813,16 @@ def show(region, forced_model=None, forced_parameter=None):
             return
         _all=job["hours"]
         _cache=st.session_state.get("eu_batch_maps",{})
-        def _key(hour):
-            return (MAP_STYLE_VERSION,model,region,parameter,preview_run,hour)
-        _done=sum(_key(h) in _cache for h in _all)
+        def _has(hour):
+            return any(k[:4]==(MAP_STYLE_VERSION,model,region,parameter) and k[5]==hour for k in _cache)
+        _done=sum(_has(h) for h in _all)
         if _done<len(_all):
-            hour=next(h for h in _all if _key(h) not in _cache)
+            hour=next(h for h in _all if not _has(h))
             _calculate_map(hour)
             _cache=st.session_state.get("eu_batch_maps",{})
-            _done=sum(_key(h) in _cache for h in _all)
+            _done=sum(_has(h) for h in _all)
             # A failed forecast hour must not block the remaining hours.
-            if _key(hour) not in _cache:
+            if not _has(hour):
                 job.setdefault("failed",[]).append(hour)
                 job["hours"]=[h for h in _all if h!=hour]
         _total=len(_all)+len(job.get("failed",[]))
