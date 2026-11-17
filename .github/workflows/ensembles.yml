@@ -5,8 +5,8 @@ on:
     branches: [main]
     paths: ['.github/workflows/ensembles.yml']
   schedule:
-    # Four daily refreshes; archive viewer keeps serving last published image.
-    - cron: '25 5,11,17,23 * * *'
+    # Poll hourly; keep serving the last published image until a new cycle is ready.
+    - cron: '20 * * * *'
   workflow_dispatch:
     inputs:
       model:
@@ -64,22 +64,23 @@ jobs:
           model=os.environ['MODEL']
           place=os.environ['PLACE']
           scheduled=os.environ['EVENT_NAME'] in ('schedule','push')
-          # Publish compact short-range products first. Never block the viewer
-          # waiting for every +384h member to be ready.
+          # Publish short range first, including the newest available cycle.
+          # +120 h uses the same cached GEFS point data for +0..48 h.
           parameters=['T850','T2'] if scheduled else shlex.split(os.environ['PARAMS'])
-          horizon=48 if scheduled else (48 if model=='GEFS' else 48)
-          # Work on most recent eligible cycle first; fall back one cycle
-          # if it is not fully published yet.
-          for run in recent_cycles(model,count=2):
-              for param in parameters:
-                  path=image_path(model,place,param,run,horizon)
-                  if path.exists():
-                      print(f"EXISTS {path}")
-                      continue
-                  try:
-                      generate(model,place,run,horizon,param)
-                  except Exception as exc:
-                      print(f"NOT READY {model} {run:%Y%m%d%H} {param}: {exc}")
+          horizons=[48,120] if model=='GEFS' else [48]
+          cycles=recent_cycles(model,count=2)
+          # Priority: newest +48 h, newest +120 h, then older fallback.
+          for run in cycles:
+              for horizon in horizons:
+                  for param in parameters:
+                      path=image_path(model,place,param,run,horizon)
+                      if path.exists():
+                          print(f"EXISTS {path}")
+                          continue
+                      try:
+                          generate(model,place,run,horizon,param)
+                      except Exception as exc:
+                          print(f"NOT READY {model} {run:%Y%m%d%H} {param} +{horizon}h: {exc}")
           PY
       - name: Commit generated PNGs
         run: |
