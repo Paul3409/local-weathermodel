@@ -60,13 +60,13 @@ def _font(size, bold=False):
     return ImageFont.load_default()
 
 
-def frame_png(data, parameter, model, region, run, valid, source=None):
+def frame_png(data, parameter, model, region, run, valid, source=None, portrait_override=None):
     """Professional navy frame. All weather values and palette colors stay intact."""
     from zoneinfo import ZoneInfo
     raw = Image.open(io.BytesIO(data)).convert("RGB")
     # Every exported weather map uses a genuine 4:3 canvas.
     # Contain the complete map image (never crop or stretch geographic data).
-    portrait = region == "Deutschland"
+    portrait = (region == "Deutschland") if portrait_override is None else portrait_override
     width = 1200 if portrait else 1600
     height = 1600 if portrait else 1200
     scale = width / 1100.0
