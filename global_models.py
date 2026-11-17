@@ -204,9 +204,8 @@ def show(region, forced_model=None, forced_parameter=None):
         st.subheader(f"Globale Modelle · {region}")
     model=forced_model or st.segmented_control("Modell",["ECMWF IFS","GEFS Mittel"],default="ECMWF IFS",key="global_model")
     st.caption("Direktdaten: ECMWF Open Data (IFS oper) / NOAA NOMADS (GEFS geavg). Kein Open-Meteo.")
-    available=recent_cycles(model, count=9)
-    run=st.selectbox("Vier letzte berechnete Modellzyklen (UTC)",available,
-        format_func=lambda d:f"{d:%d.%m.%Y %H} UTC",key="global_run_"+model)
+    from v2_model_runs import run_picker
+    run=run_picker(model,"global_run_"+model)
     st.caption("UTC-Initialisierung, nicht Fertigstellungszeit. Modellabhängige Verzögerung berücksichtigt; Dateiverfügbarkeit beim Abruf geprüft.")
     options=steps(model,run)
     lead=st.select_slider("Prognosestunde",options=options,value=options[min(2,len(options)-1)],
