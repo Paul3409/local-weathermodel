@@ -239,17 +239,23 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
     if precip is not None:
         # NOAA APCP is already an interval total in kg/m² = mm; ECMWF tp is cumulative.
         rain=precip if model=="GEFS" else np.maximum(np.diff(precip,axis=1,prepend=np.nan),0)
+        # Filter missing-value sentinels / implausible totals instead of
+        # letting invalid precipitation values dominate the axis.
+        rain=np.where((rain>=0)&(rain<=300),rain,np.nan)
         rain=np.nanmean(rain,axis=0)
-        ax2=fig.add_axes([.075,.17,.88,.075],sharex=ax,facecolor="#0C2946")
+        ax2=fig.add_axes([.075,.245,.88,.105],sharex=ax,facecolor="#0C2946")
         ax2.plot(times,rain,color="#50C8F0",lw=1.9,marker=".",markersize=3)
         ax2.fill_between(times,0,rain,color="#50C8F0",alpha=.13)
         ax2.set_ylabel("NS (mm/6h)",color="#83D8FF",fontsize=9)
         ax2.tick_params(axis="y",colors="#83D8FF",labelsize=8)
-        ax2.tick_params(axis="x",labelbottom=False,bottom=False)
+        ax2.tick_params(axis="x",labelbottom=True,bottom=True,colors="#D9E8F6",labelsize=9,pad=5)
+        ax2.xaxis.set_major_locator(DayLocator(interval=2))
+        ax2.xaxis.set_major_formatter(DateFormatter("%d.%m",tz=LOCAL_TZ))
+        ax.tick_params(axis="x",labelbottom=False,bottom=False)
         ax2.grid(color="#6C8BA5",alpha=.2,linestyle="--")
         for spine in ax2.spines.values():spine.set_color("#5CA8D4")
         ax2.set_ylim(bottom=0)
-        ax.set_position([.075,.35,.88,.35])
+        ax.set_position([.075,.365,.88,.335])
     # ELBTAL cloud mark in the same cyan line style as the weather map frames.
     for x,y,w,h,t1,t2 in [(.023,.919,.036,.037,0,180),(.039,.931,.051,.055,0,180),(.075,.918,.037,.039,0,180)]:
         fig.add_artist(Arc((x+w/2,y+h/2),w,h,theta1=t1,theta2=t2,
@@ -284,7 +290,7 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
         handles.append(Line2D([0],[0],color="#41F277",lw=2.8,label="GFS HAUPTLAUF"))
     handles.append(Line2D([0],[0],color="white",lw=3,label="AVG"))
     legend=fig.legend(handles=handles,loc="lower center",
-             bbox_to_anchor=(.5,.115),ncol=11 if model=="GEFS" else 13,
+             bbox_to_anchor=(.5,.125),ncol=11 if model=="GEFS" else 13,
              fontsize=7.5,frameon=False,columnspacing=.9,handlelength=1.7)
     for t in legend.get_texts():t.set_color("#D9E8F6")
     fig.add_artist(FancyBboxPatch((.025,.027),.95,.055,
