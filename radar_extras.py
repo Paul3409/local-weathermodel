@@ -280,12 +280,13 @@ def show():
     st.subheader("📡 ELBTAL | Regenradar Deutschland")
     mode = st.selectbox(
         "Radarparameter",
-        ["Reflektivität (dBZ)", "Regenrate (mm/h)", "Live-Wetteranalyse", "Niederschlagssummen"],
+        ["Reflektivität (dBZ)", "Regenrate (mm/h)", "Live-Wetteranalyse", "Niederschlagssummen", "Hagelrisiko"],
         key="radar_mode_new",
     )
     product = {
         "Reflektivität (dBZ)": "WN", "Regenrate (mm/h)": "RY",
         "Live-Wetteranalyse": "HYMEC", "Niederschlagssummen": "RW",
+        "Hagelrisiko": "KONRAD3D",
     }[mode]
     hours = (st.selectbox("Zeitraum", [1, 3, 6, 12, 24],
                           format_func=lambda n: f"{n} Stunden", key="radar_rw_hours")
@@ -295,8 +296,12 @@ def show():
     st.caption("DWD-Radardaten · HYMEC: bodennahe Niederschlagsart; "
                "RW: stationskorrigierte stündliche Niederschlagssummen.")
     try:
-        frames = (list_extra_frames(product) if product in ("HYMEC", "RW")
-                  else radar.list_frames(product))
+        if product == "KONRAD3D":
+            import radar_hail
+            frames = radar_hail.list_frames()
+        else:
+            frames = (list_extra_frames(product) if product in ("HYMEC", "RW")
+                      else radar.list_frames(product))
     except Exception as exc:
         st.error(f"Radarverzeichnis nicht erreichbar: {type(exc).__name__}: {exc}")
         return
@@ -319,7 +324,11 @@ def show():
     if st.button("📡 Radaraufnahme laden", type="primary"):
         try:
             with st.spinner("Originale DWD-Radardaten laden …"):
-                if product == "RW":
+                if product == "KONRAD3D":
+                    import radar_hail
+                    cells = radar_hail.load_cells(url)
+                    png = radar_hail.render(cells, stamp, cities=cities)
+                elif product == "RW":
                     field, geo = accumulated_rw(hours, stamp)
                 elif product == "HYMEC":
                     field, geo = read_extra_frame(url, product)
@@ -338,9 +347,10 @@ def show():
                     except (requests.RequestException, OSError, ValueError, RuntimeError) as exc:
                         st.info("WN-Reflektivität nicht verfügbar; originale HYMEC-Klassen "
                                 f"werden angezeigt ({type(exc).__name__}).")
-                png = render_extra(field, geo, product, stamp, cities=cities, hours=hours,
-                                   reflectivity=reflectivity,
-                                   reflectivity_geometry=reflectivity_geometry)
+                if product != "KONRAD3D":
+                    png = render_extra(field, geo, product, stamp, cities=cities, hours=hours,
+                                       reflectivity=reflectivity,
+                                       reflectivity_geometry=reflectivity_geometry)
             st.session_state["radar_image_extra"] = (cache_key, png)
         except Exception as exc:
             st.error(f"Radaraufnahme nicht darstellbar: {type(exc).__name__}: {exc}")
@@ -354,6 +364,12 @@ def show():
     if product == "RW":
         st.caption("RW: 60-Minuten-Mengen (mm) in genau einstündigem Abstand. "
                    "Unvollständige Reihen werden nicht als gültige Summe angezeigt.")
+    elif product == "KONRAD3D":
+        st.caption("DWD KONRAD3D: 5-Minuten-Gewitterzellen mit Hagel-Warnflag. "
+                   "Fünf Legendenklassen: kein Signal, Hagelsignal und Großhagelsignal, "
+                   "jeweils nach kleinerer bzw. ausgedehnterer erkannter Hagelfläche "
+                   "(ELBTAL-Schwelle 5 km²). Keine Prozentwahrscheinlichkeit; "
+                   "ohne erkannte Zellen ist die Karte leer.")
     elif product == "HYMEC":
         st.caption("HYMEC: bodennahe Niederschlagsart (DWD). Intensitätsstufen für "
                    "Regen und Schnee sind eigene, näherungsweise Schätzungen aus "
