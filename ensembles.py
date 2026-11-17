@@ -305,6 +305,29 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
     plt.close(fig)
     return out.getvalue()
 
+def _rebrand_archived_png(raw):
+    """Update the two legacy branding labels on already published ensemble PNGs.
+
+    The meteorological plot, axes, legend, and data remain untouched.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    from matplotlib import font_manager
+    picture=Image.open(io.BytesIO(raw)).convert("RGB")
+    width,height=picture.size
+    draw=ImageDraw.Draw(picture)
+    font_path=font_manager.findfont("DejaVu Sans")
+    title_font=ImageFont.truetype(font_path,max(12,round(width*24/1620)))
+    footer_font=ImageFont.truetype(font_path,max(10,round(width*11/1620)))
+    # Matplotlib figure positions are bottom-origin; Pillow is top-origin.
+    draw.rectangle((int(width*.122),int(height*.025),int(width*.365),int(height*.081)),fill="#071B30")
+    draw.text((int(width*.125),int(height*.033)),"MeteoOst",font=title_font,fill="white",stroke_width=0)
+    draw.rectangle((int(width*.815),int(height*.930),int(width*.965),int(height*.969)),fill="#0C2946")
+    draw.text((int(width*.82),int(height*.944)),f"MeteoOst V{VERSION}",font=footer_font,fill="white")
+    out=io.BytesIO()
+    picture.save(out,format="PNG")
+    return out.getvalue()
+
+
 def show():
     """Instant display of already published diagrams, without model downloads."""
     from ensemble_archive import available_images
@@ -347,8 +370,9 @@ def show():
     else:
         st.caption(f"Archivlauf: {run:%d.%m.%Y · %H} UTC · +{horizon} h. "
                    f"Neuester verfügbarer Lauf: {latest:%d.%m.%Y · %H} UTC.")
-    st.image(str(result),use_container_width=True)
-    st.download_button("Ensemble als PNG herunterladen",result.read_bytes(),
+    branded_png=_rebrand_archived_png(result.read_bytes())
+    st.image(branded_png,use_container_width=True)
+    st.download_button("Ensemble als PNG herunterladen",branded_png,
                        file_name=result.name,mime="image/png",key="ens_archive_download")
     st.caption("NOAA/ECMWF-Originaldaten · vorab berechnete MeteoOst-Grafik. "
                "Neue Modellläufe erscheinen automatisch nach der Veröffentlichung durch den GitHub-Workflow.")
