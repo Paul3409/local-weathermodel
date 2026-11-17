@@ -169,7 +169,7 @@ def render(values,geo,product,stamp):
     cmap=ListedColormap(COLORS)
     cmap.set_bad("#10273e")
     norm=BoundaryNorm(bounds,cmap.N)
-    fig,ax=plt.subplots(figsize=(9,8),dpi=120)
+    fig,ax=plt.subplots(figsize=(15,8.2),dpi=120)
     fig.patch.set_facecolor("#071e35")
     ax.set_facecolor("#10273e")
     image=ax.imshow(sampled,origin="lower",extent=(5.4,15.6,46.9,55.4),
@@ -181,18 +181,19 @@ def render(values,geo,product,stamp):
     ax.grid(color="white",alpha=.12,linewidth=.5)
     ax.set_xlabel("Längengrad (°O)",color="#d6e5f2")
     ax.set_ylabel("Breitengrad (°N)",color="#d6e5f2")
-    fig.subplots_adjust(left=.09,right=.98,top=.96,bottom=.19)
-    cb=fig.colorbar(image,ax=ax,orientation="horizontal",pad=.09,
-                    fraction=.045,aspect=35,spacing="uniform",
+    # Radar-only wide export: large map and a right-hand vertical colorbar.
+    fig.subplots_adjust(left=.055,right=.855,top=.97,bottom=.095)
+    cax=fig.add_axes([.89,.15,.025,.76])
+    cb=fig.colorbar(image,cax=cax,orientation="vertical",spacing="uniform",
                     ticks=[0,10,20,30,40,50,60,70] if product=="WN"
                     else [0,.5,1,2,5,10,20,50,100])
-    cb.ax.tick_params(colors="#d6e5f2",labelsize=8)
+    cb.ax.tick_params(colors="#d6e5f2",labelsize=10)
     cb.set_label("Radarreflektivität (dBZ)" if product=="WN" else "Niederschlagsintensität (mm/h) · 5-Minuten-Mittel",color="#d6e5f2")
     buf=io.BytesIO()
     fig.savefig(buf,format="png",facecolor=fig.get_facecolor(),dpi=120)
     plt.close(fig)
     label="Radarreflektivität" if product=="WN" else "Radar-Regenrate"
-    return frame_png(buf.getvalue(),label,"DWD RADOLAN","Deutschland",stamp,stamp)
+    return frame_png(buf.getvalue(),label,"DWD RADOLAN","Deutschland",stamp,stamp,portrait_override=False)
 
 def show():
     st.subheader("📡 ELBTAL | Regenradar Deutschland")
