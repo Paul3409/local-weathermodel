@@ -1,4 +1,4 @@
-"""ELBTAL DWD radar: original RX reflectivity and RY 5-minute precipitation."""
+"""MeteoOst DWD radar: original RX reflectivity and RY 5-minute precipitation."""
 import bz2
 import tarfile
 import h5py
@@ -22,7 +22,7 @@ from map_design import frame_png
 
 BASE="https://opendata.dwd.de/weather/radar/"
 TZ=ZoneInfo("Europe/Berlin")
-HEADERS={"User-Agent":"ELBTAL educational weather radar visualization"}
+HEADERS={"User-Agent":"MeteoOst educational weather radar visualization"}
 # RADOLAN 900x900 legacy national composite: 1 km polar stereographic grid.
 PROJ="+proj=stere +lat_0=90 +lat_ts=60 +lon_0=10 +a=6370040 +b=6370040 +units=m +no_defs"
 TRANSFORMER=Transformer.from_crs("EPSG:4326",PROJ,always_xy=True)
