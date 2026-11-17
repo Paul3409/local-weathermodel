@@ -566,7 +566,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         # Grouped WW legend is drawn in the navy outer frame.
         fig.subplots_adjust(left=.095,right=.985,top=.975,bottom=.095)
     else:
-        cb=fig.colorbar(im,ax=ax,orientation="vertical" if region=="Mitteleuropa" else "horizontal",pad=.035 if region=="Mitteleuropa" else .08,fraction=.045 if region=="Mitteleuropa" else .05)
+        cb=fig.colorbar(im,ax=ax,orientation="vertical" if region!="Deutschland" else "horizontal",pad=.035 if region!="Deutschland" else .08,fraction=.045 if region!="Deutschland" else .05)
     if parameter=="Signifikantes Wetter":
         pass
     elif parameter in ("Neuschneemenge","Schneehöhe"):
@@ -595,7 +595,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         else:
             ax.set_position([.095,.18,.875,.795])
             cb.ax.set_position([.14,.085,.78,.028])
-    if region=="Mitteleuropa":
+    if region!="Deutschland":
         # Fill the card vertically, leaving a narrow, dedicated strip for
         # a right-hand temperature/parameter scale. Never stretch geography.
         fig.set_size_inches(13.2,8.8)
@@ -610,15 +610,6 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             cb.ax.tick_params(axis="y",labelsize=10,labelrotation=0,pad=5)
             # Keep tick numbers horizontal for easy reading, from top to bottom.
             cb.set_label(label,rotation=270,labelpad=22)
-    if region=="Europa & Nordatlantik":
-        # Same wide layout for the other European synoptic parameters.
-        fig.set_size_inches(15,7.4)
-        ax.set_aspect("auto")
-        if parameter=="Signifikantes Wetter":
-            ax.set_position([.065,.10,.90,.86])
-        else:
-            ax.set_position([.065,.22,.90,.74])
-            cb.ax.set_position([.14,.105,.76,.035])
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
     plt.close(fig)
