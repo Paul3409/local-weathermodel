@@ -2,7 +2,7 @@ name: Prepare ELBTAL ensemble PNGs
 
 on:
   schedule:
-    # Runs 4 times daily, with publication buffer after 00/06/12/18 UTC.
+    # Four daily refreshes; archive viewer keeps serving last published image.
     - cron: '25 5,11,17,23 * * *'
   workflow_dispatch:
     inputs:
@@ -17,7 +17,7 @@ on:
         required: true
         default: Mühlberg (Elbe)
       parameters:
-        description: Space-separated parameter names (quote multiword parameters)
+        description: Parameter(s), e.g. T850 or "T2 + Niederschlag"
         required: true
         default: T2
 
@@ -45,27 +45,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libeccodes0 libeccodes-dev
           pip install -r requirements.txt
-      - name: Generate the PNG archive
+      - name: Generate the latest available ensemble PNGs
         env:
           MODEL: ${{ github.event.inputs.model || 'GEFS' }}
           PLACE: ${{ github.event.inputs.place || 'Mühlberg (Elbe)' }}
           PARAMS: ${{ github.event.inputs.parameters || 'T2' }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           python - <<'PY'
           import os
-          from datetime import datetime, timezone
-          from ensemble_archive import generate, image_path, HORIZONS
+          import shlex
+          from ensemble_archive import generate, image_path
           from model_cycles import recent_cycles
+
           model=os.environ['MODEL']
           place=os.environ['PLACE']
-          # Keep the scheduled workload manageable: T2 is the first fully
-          # automated product. Other parameters can be dispatched manually.
-          parameters=['T2'] if os.environ.get('GITHUB_EVENT_NAME')=='schedule' else [os.environ['PARAMS']]
+          scheduled=os.environ['EVENT_NAME']=='schedule'
+          # Publish compact short-range products first. Never block the viewer
+          # waiting for every +384h member to be ready.
+          parameters=['T850','T2'] if scheduled else shlex.split(os.environ['PARAMS'])
+          horizon=48 if scheduled else (48 if model=='GEFS' else 48)
+          # Work on most recent eligible cycle first; fall back one cycle
+          # if it is not fully published yet.
           for run in recent_cycles(model,count=2):
               for param in parameters:
-                  path=image_path(model,place,param,run,HORIZONS[model])
-                  if not path.exists():
-                      generate(model,place,run,HORIZONS[model],param)
+                  path=image_path(model,place,param,run,horizon)
+                  if path.exists():
+                      print(f"EXISTS {path}")
+                      continue
+                  try:
+                      generate(model,place,run,horizon,param)
+                  except Exception as exc:
+                      print(f"NOT READY {model} {run:%Y%m%d%H} {param}: {exc}")
           PY
       - name: Commit generated PNGs
         run: |
