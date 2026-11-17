@@ -81,11 +81,8 @@ def frame_png(data, parameter, model, region, run, valid, source=None):
     max_map_h = map_bottom - top
     if max_map_h <= 0:
         raise RuntimeError("Ungültiges 4:3-Kartenlayout.")
-    if True:
-        # Remove empty Matplotlib margins on every map, without cropping weather data.
-        # The Germany detail map keeps its existing portrait dimensions.
-        # Only the Germany detail map: remove empty navy margins already
-        # embedded in the Matplotlib PNG before fitting it into the frame.
+    if raw.width and raw.height:
+        # Trim only the uniform Matplotlib background on all map regions.
         # Preserve all colored map pixels, labels, ticks and colorbar.
         from PIL import ImageChops
         background = Image.new("RGB", raw.size, raw.getpixel((0, 0)))
