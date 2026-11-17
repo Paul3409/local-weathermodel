@@ -11,7 +11,8 @@ import requests
 import streamlit as st
 from eccodes import codes_grib_new_from_file,codes_get,codes_get_array,codes_release
 from scipy.interpolate import griddata
-from icon_eu import REGIONS,LOCAL_TZ,render
+from icon_eu import REGIONS,LOCAL_TZ,render,plot_geometry,borders,COUNTRIES
+from map_design import style_figure,frame_png
 from global_models import climatology_on_grid,anomaly_map
 
 BASE="https://opendata.dwd.de/weather/nwp/v1/m/icon-d2-ruc/p"
@@ -105,6 +106,32 @@ def field(run,lead,parameter,region):
         Z=np.where(np.isfinite(Z),Z,near)
     return X,Y,Z
 
+def render_diagnostic(X,Y,Z,region,parameter,run,valid):
+    """Dedicated CAPE and reflectivity palette without modifying existing map renderer."""
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import BoundaryNorm,ListedColormap
+    if parameter=="CAPE":
+        levels=[0,50,100,250,500,750,1000,1500,2000,3000,4000,6000]
+        colors=["#f4f6fa","#c9e7f7","#83c3eb","#458cc9","#3462aa","#46a36b","#b9c750","#f3cf49","#ef9139","#df4c3b","#a32669"]
+        label="Mixed-Layer CAPE (J/kg)"
+    else:
+        levels=[-10,0,5,10,15,20,25,30,35,40,45,50,55,60,65,75,90]
+        colors=["#f5f7fa","#d8edf8","#abd9f1","#74b5e5","#387fcb","#2366a4","#3a9c74","#77bc4e","#c4d34a","#f2cf42","#f6a23b","#e96c36","#db3e35","#b92655","#90266e","#652e8e"]
+        label="Simulierte maximale Radarreflektivität (dBZ)"
+    fig,ax=plt.subplots(figsize=(10,10) if region=="Deutschland" else (12,8.5),dpi=120)
+    cmap=ListedColormap(colors)
+    im=ax.contourf(X,Y,Z,levels=levels,cmap=cmap,norm=BoundaryNorm(levels,cmap.N),extend="max")
+    try:
+        for feature in borders(COUNTRIES).get("features",[]):
+            plot_geometry(ax,feature.get("geometry"),.45)
+    except Exception:pass
+    west,east,south,north=REGIONS[region]
+    ax.set_xlim(west,east);ax.set_ylim(south,north)
+    cb=fig.colorbar(im,ax=ax,shrink=.75);cb.set_label(label)
+    style_figure(fig,ax)
+    out=io.BytesIO();fig.savefig(out,format="png",bbox_inches="tight");plt.close(fig)
+    return frame_png(out.getvalue(),parameter,"ICON-D2-RUC",region,run,valid)
+
 def recent_runs():
     cutoff=datetime.now(timezone.utc)-timedelta(minutes=55)
     latest=cutoff.replace(minute=0,second=0,microsecond=0)
@@ -137,7 +164,7 @@ def show(region):
                 else:
                     pressure=field(run,lead,"MSLP",region)[2] if parameter in ("T850 + MSLP","Z500 + MSLP") else None
                     name={"T2":"2-m-Temperatur","CAPE":"CAPE","Simulierte Radarreflektivität":"Simulierte Radarreflektivität"}.get(parameter,parameter)
-                    png=render(X,Y,Z,region,name,run,valid,model="ICON-D2-RUC",mslp=pressure)
+                    png=(render_diagnostic(X,Y,Z,region,parameter,run,valid) if parameter in ("CAPE","Simulierte Radarreflektivität") else render(X,Y,Z,region,name,run,valid,model="ICON-D2-RUC",mslp=pressure))
                 st.session_state["ruc_map"]=(region,run,lead,parameter,valid,png)
         except Exception as exc:
             st.error(f"DWD-RUC-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}")
