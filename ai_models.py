@@ -77,8 +77,8 @@ def show(region,forced_model=None,forced_parameter=None):
         st.subheader(f"NOAA KI-Wettermodelle · {region}")
     model=forced_model or st.segmented_control("Modell",["AIGFS","AIGEFS Mittel"],default="AIGFS",key="ai_model")
     st.caption("Originaldaten NOAA NOMADS · AIGEFS Mittel = räumliche Karten des Ensemblemittels, keine Diagramme. Kein Open-Meteo.")
-    runs=recent_cycles(model,count=9)
-    run=st.selectbox("Modelllauf (UTC)",runs,format_func=lambda x:f"{x:%d.%m.%Y %H} UTC",key="ai_run_"+model)
+    from v2_model_runs import run_picker
+    run=run_picker(model,"ai_run_"+model)
     lead=st.select_slider("Vorhersagestunde",options=list(range(0,385,6)),value=24,
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="ai_lead_"+model)
