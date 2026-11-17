@@ -1,4 +1,4 @@
-"""Visual-only Streamlit theme for ELBTAL V2. No map data or image pixels changed."""
+"""Visual-only Streamlit theme for MeteoOst V2. No map data or image pixels changed."""
 import streamlit as st
 
 def apply():
