@@ -48,37 +48,37 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libeccodes0 libeccodes-dev
           pip install -r requirements.txt
-      - name: One-time rebuild of GEFS 06 UTC T2 precipitation graphic
+      - name: Re-render GEFS 06 UTC precipitation PNG from saved cache
         if: ${{ github.event_name == 'push' }}
         run: |
           python - <<'PY'
-          from datetime import datetime, timezone
-          from ensemble_archive import generate, image_path
+          from datetime import datetime,timezone
+          import numpy as np
+          from ensemble_archive import _cache_file,image_path
+          from ensembles import draw,PLACES
+          model,place='GEFS','Mühlberg (Elbe)'
           run=datetime(2026,11,17,6,tzinfo=timezone.utc)
-          model='GEFS'
-          place='Mühlberg (Elbe)'
-          parameter='T2 + Niederschlag'
-          horizon=384
-          target=image_path(model,place,parameter,run,horizon)
-          print(f"REBUILD {target}",flush=True)
-          # Rebuild the existing PNG using the corrected renderer and cached
-          # NOAA ensemble values; preserve old PNG if inputs are incomplete.
-          import tempfile
-          if target.exists():
-              backup=target.with_suffix('.png.bak')
-              target.rename(backup)
-          else:
-              backup=None
-          try:
-              ok=generate(model,place,run,horizon,parameter)
-              if not ok:
-                  print("DEFERRED: incomplete source data",flush=True)
-                  if backup: backup.rename(target)
-              elif backup:
-                  backup.unlink()
-          except Exception:
-              if backup and backup.exists(): backup.rename(target)
-              raise
+          steps=list(range(0,385,6))
+          arrays={}
+          for field in ('t2','precip'):
+              cache=_cache_file(model,place,field,run)
+              if not cache.exists():
+                  raise RuntimeError(f"Missing cached GEFS data: {cache}")
+              with np.load(cache,allow_pickle=False) as saved:
+                  known={int(h):j for j,h in enumerate(saved['steps'])}
+                  values=saved['data']
+                  arrays[field]=np.column_stack([
+                      values[:,known[h]] if h in known else np.full(31,np.nan)
+                      for h in steps])
+              valid=np.isfinite(arrays[field][:,1:]).mean()
+              print(f"{field} cached coverage: {valid:.1%}",flush=True)
+              if valid<0.85:
+                  raise RuntimeError(f"Insufficient cached {field} coverage")
+          target=image_path(model,place,'T2 + Niederschlag',run,384)
+          target.parent.mkdir(parents=True,exist_ok=True)
+          target.write_bytes(draw(model,place,run,'t2',steps,arrays['t2'],
+                                  precip=arrays['precip']))
+          print(f"RENDERED {target}",flush=True)
           PY
       - name: Generate the latest available ensemble PNGs
         env:
