@@ -446,19 +446,23 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         # ELBTAL V2 design D: strong, differentiated colors without neon.
         # 551.999 gpdam is green, 552.000 gpdam starts yellow.
         # Keep the discontinuity and the emphasized black 552 contour.
-        lower=LinearSegmentedColormap.from_list("z500_cool_v2_d",[
-            (0.0,"#173B83"),(.18,"#2065A8"),(.38,"#278BB9"),
-            (.57,"#24B0B6"),(.75,"#22BC85"),(.90,"#48BE56"),
-            (1.0,"#83C848")])
-        upper=LinearSegmentedColormap.from_list("z500_warm_v2_d",[
-            (0.0,"#F4DD43"),(.18,"#F5CB36"),(.38,"#F3A52D"),
-            (.60,"#EB7D2C"),(.80,"#DF5638"),(1.0,"#C43A59")])
+        # Shift the cool hues towards stronger blue already at 510-525 gpdam,
+        # and bring orange/red forward on the warm side. Moderate saturation:
+        # distinctly stronger than design D, but deliberately not neon.
+        lower=LinearSegmentedColormap.from_list("z500_cool_v2_d_plus",[
+            (0.0,"#142D77"),(.18,"#174A99"),(.34,"#1D65AC"),
+            (.48,"#227EAE"),(.60,"#2299AD"),(.72,"#1FAF91"),
+            (.85,"#2CB36A"),(1.0,"#67BD42")])
+        upper=LinearSegmentedColormap.from_list("z500_warm_v2_d_plus",[
+            (0.0,"#F3D53C"),(.14,"#F2B92C"),(.32,"#EF9225"),
+            (.50,"#E76C28"),(.70,"#D64A36"),(.85,"#BF3650"),
+            (1.0,"#A72C62")])
         # Each one-gpdam interval has its own color. The 552 boundary is
         # shared by both map contours and the colorbar (no blended band).
         levels=np.arange(480,601,1,dtype=float)
         colors=[lower((v-480)/72) for v in range(480,552)]
         colors += [upper((v-552)/48) for v in range(552,600)]
-        cmap=ListedColormap(colors,name="elbtal_z500_v2_design_d")
+        cmap=ListedColormap(colors,name="elbtal_z500_v2_design_d_plus")
         norm=BoundaryNorm(levels,cmap.N)
         im=ax.contourf(X,Y,Z,levels=levels,cmap=cmap,norm=norm,extend="both")
         pressure=np.ma.masked_invalid(mslp)
