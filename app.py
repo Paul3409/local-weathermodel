@@ -629,11 +629,17 @@ if map_region == '🇩🇪 Deutschland Detail':
     st.subheader('🇩🇪 Deutschland · Detailkarte (3:4)')
     detail_model = st.segmented_control(
         'Modell für Deutschland',
-        ['ICON-D2', 'ICON-EU', 'GFS', 'ECMWF IFS'],
+        ['ICON-D2', 'ICON-D2-RUC', 'ICON-EU', 'GFS', 'ECMWF IFS', 'AIGFS', 'AIGEFS Mittel'],
         default='ICON-D2', key='germany_detail_model',
     )
     st.caption('Deutschland im 3:4-Hochformat · ICON-D2 als Standard; andere Modelle zum direkten Vergleich.')
-    if detail_model == 'ECMWF IFS':
+    if detail_model in ('AIGFS', 'AIGEFS Mittel'):
+        from ai_models import show as show_ai_detail
+        show_ai_detail('Deutschland', forced_model=detail_model)
+    elif detail_model == 'ICON-D2-RUC':
+        from icon_d2_ruc import show as show_ruc_detail
+        show_ruc_detail('Deutschland')
+    elif detail_model == 'ECMWF IFS':
         from global_models import show as show_germany_global
         show_germany_global('Deutschland', forced_model=detail_model)
     else:
@@ -643,17 +649,28 @@ if map_region == '🇩🇪 Deutschland Detail':
 if map_region == '🌍 Globalmodelle':
     from global_models import show as show_global_models
     global_area = st.segmented_control('Globales Kartengebiet', ['Mitteleuropa','Europa & Nordatlantik'], default='Europa & Nordatlantik', key='global_area')
-    show_global_models(global_area)
+    global_model = st.segmented_control('Globales Modell', ['ECMWF IFS', 'GEFS Mittel', 'AIGFS', 'AIGEFS Mittel'], default='ECMWF IFS', key='global_ai_choice')
+    if global_model in ('AIGFS', 'AIGEFS Mittel'):
+        from ai_models import show as show_ai_global
+        show_ai_global(global_area, forced_model=global_model)
+    else:
+        show_global_models(global_area, forced_model=global_model)
     st.stop()
 
 if map_region in ('Mitteleuropa','Europa & Nordatlantik'):
     regional_model = st.segmented_control(
         "Wettermodell",
-        ["ICON-EU", "GFS", "ECMWF IFS", "GEFS Mittel"],
+        ["ICON-EU", "ICON-D2-RUC", "GFS", "ECMWF IFS", "GEFS Mittel", "AIGFS", "AIGEFS Mittel"],
         default="ICON-EU",
         key="regional_synoptic_model",
     )
-    if regional_model in ("ECMWF IFS", "GEFS Mittel"):
+    if regional_model in ("AIGFS", "AIGEFS Mittel"):
+        from ai_models import show as show_regional_ai
+        show_regional_ai(map_region, forced_model=regional_model)
+    elif regional_model == "ICON-D2-RUC":
+        from icon_d2_ruc import show as show_regional_ruc
+        show_regional_ruc(map_region)
+    elif regional_model in ("ECMWF IFS", "GEFS Mittel"):
         from global_models import show as show_regional_global
         show_regional_global(map_region, forced_model=regional_model)
     else:
