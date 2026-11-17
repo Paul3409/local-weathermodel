@@ -16,7 +16,7 @@ from map_design import style_figure,frame_png
 from global_models import climatology_on_grid,anomaly_map
 
 BASE="https://opendata.dwd.de/weather/nwp/v1/m/icon-d2-ruc/p"
-HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.20 (educational)"}
+HEADERS={"User-Agent":"MeteoOst-Wetterkarten/1.20 (educational)"}
 PARAMS={
     "MSLP":("PMSL",None,None),
     "T850":("T",100,85000),
