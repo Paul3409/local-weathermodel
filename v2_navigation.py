@@ -4,6 +4,7 @@ Only valid model/region/parameter combinations are offered. Existing
 radar, ensemble meteograms and local products remain separate.
 """
 import streamlit as st
+import importlib
 from contextlib import contextmanager
 
 ALL_REGIONS = ["Deutschland", "Mitteleuropa", "Europa & Nordatlantik"]
@@ -69,20 +70,24 @@ def show_model_maps():
     parameter=dropdown("3. Parameter", "v2_parameter", CAPABILITIES[model][region])
     with collect_explanations() as notes:
         if model=="ICON-D2-RUC":
-            from icon_d2_ruc import show
-            show(region, forced_parameter=parameter)
+            import icon_d2_ruc
+            importlib.reload(icon_d2_ruc)
+            icon_d2_ruc.show(region, forced_parameter=parameter)
         elif model=="GFS" and parameter=="Schneefallgrenze (Schätzung)":
             from snowline import show
             show(region)
         elif model in ("AIGFS","AIGEFS Mittel"):
-            from ai_models import show
-            show(region, forced_model=model, forced_parameter=parameter)
+            import ai_models
+            importlib.reload(ai_models)
+            ai_models.show(region, forced_model=model, forced_parameter=parameter)
         elif model in ("ECMWF IFS","GEFS Mittel"):
-            from global_models import show
-            show(region, forced_model=model, forced_parameter=parameter)
+            import global_models
+            importlib.reload(global_models)
+            global_models.show(region, forced_model=model, forced_parameter=parameter)
         else:
-            from icon_eu import show
-            show(region, forced_model=model, forced_parameter=parameter)
+            import icon_eu
+            importlib.reload(icon_eu)
+            icon_eu.show(region, forced_model=model, forced_parameter=parameter)
     with st.expander("ℹ️ Modellinformationen & Hinweise", expanded=False):
         st.caption("Regionen und Parameter sind modellabhängig. Die tatsächliche Dateiverfügbarkeit wird beim Abruf geprüft.")
         for note in dict.fromkeys(notes):
