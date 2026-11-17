@@ -3,7 +3,6 @@
 This is a meteorological estimate, not a precipitation-phase forecast.
 It does not imply that precipitation is present or that snow accumulates.
 """
-import bz2
 import io
 import os
 import tempfile
@@ -186,8 +185,13 @@ def render(X,Y,snowline,run,valid):
     fig,ax=plt.subplots(figsize=(10,10),dpi=120)
     im=ax.pcolormesh(X,Y,np.ma.masked_invalid(snowline),
                      cmap=cmap,norm=norm,shading="auto",rasterized=True)
-    for feature in borders(COUNTRIES).get("features",[]):
-        geom=feature.get("geometry",{})
+    # Do not discard valid NOAA data when optional country outlines are offline.
+    try:
+        features=borders(COUNTRIES).get("features",[])
+    except (requests.RequestException,ValueError,KeyError):
+        features=[]
+    for feature in features:
+        geom=feature.get("geometry") or {}
         polygons=(geom.get("coordinates",[]) if geom.get("type")=="MultiPolygon"
                   else [geom.get("coordinates",[])] if geom.get("type")=="Polygon" else [])
         for polygon in polygons:
