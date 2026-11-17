@@ -617,8 +617,8 @@ def render_fog(X,Y,Z,run,valid):
 
 st.set_page_config(page_title='ELBTAL Wetterkarten', page_icon='🌦️', layout='wide')
 from v2_style import apply as apply_v2_style
+from app_version import VERSION as VERSION
 apply_v2_style()
-# Compact, reliable mobile header: avoids Streamlit's oversized h1 wrapping.
 st.markdown(
     f"""<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;
     margin:0 0 0.65rem 0;line-height:1.2;">
@@ -628,18 +628,25 @@ st.markdown(
     white-space:nowrap;">(v{VERSION})</span></div>""",
     unsafe_allow_html=True,
 )
-# Use an actual WebView navigation instead of only rerunning the existing
-# Streamlit session. A changing query string prevents reuse of the old page.
-# This can load newly deployed code, but cannot deploy GitHub commits itself.
+# Native refresh is reliable in Android WebView even when links are intercepted.
+# Explicitly clear Streamlit caches and session selections, then rerun the app.
+if st.button("🔄 App aktualisieren · Daten & Ansicht neu laden",
+             key="elbtal_force_refresh",use_container_width=True,type="primary"):
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.session_state.clear()
+    st.rerun()
+# Optional hard browser navigation for stale HTML/JS assets after deployment.
+# This cannot deploy code that is not yet running on Streamlit Cloud.
 import time as _elbtal_time
 from html import escape as _elbtal_escape
 _reload_token = str(_elbtal_time.time_ns())
 st.markdown(
-    '<a href="?elbtal_reload=' + _elbtal_escape(_reload_token) + '" '
-    'target="_self" style="display:inline-block;padding:0.45rem 0.9rem;'
-    'margin:0 0 0.6rem 0;border:1px solid #3984B8;border-radius:0.55rem;'
-    'background:#123A5D;color:#F3F8FF;font-weight:700;text-decoration:none;">'
-    '🔄 App vollständig neu laden</a>',
+    '<a href="./?elbtal_reload=' + _elbtal_escape(_reload_token) + '" '
+    'target="_self" style="display:inline-block;padding:0.32rem 0.65rem;'
+    'margin:0 0 0.55rem 0;border:1px solid #30536B;border-radius:0.45rem;'
+    'background:#102A43;color:#B8D4E6;font-size:0.82rem;text-decoration:none;">'
+    '↗ Browser/WebView vollständig neu öffnen</a>',
     unsafe_allow_html=True,
 )
 # Streamlit can retain imported Python modules across script reruns and
