@@ -119,7 +119,7 @@ def get_map(layer_name, valid_time, area):
     }
     response = requests.get(WMS, params=params, headers=HEADERS, timeout=(8, 50))
     response.raise_for_status()
-    if not response.content.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+    if not response.content.startswith(b"\x89PNG\r\n\x1a\n"):
         snippet = response.text[:250] if "xml" in response.headers.get("Content-Type", "").lower() else ""
         raise RuntimeError("ECMWF liefert für diese Ebene und Zeit keine PNG-Karte. " + snippet)
     if len(response.content) > 20_000_000:
