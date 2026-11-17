@@ -23,9 +23,14 @@ jobs:
           functions = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
           required = {'list_run','decode_grib','interpolate','render_gust','render_precip','render_fog','classify_precipitation'}
           assert required <= functions, required - functions
-          assert 'quarter_mode' in source
           assert 'grid_m=500' in source
           assert "decimals=0" in source
-          assert "range(25)" in source
-          print('ELBTAL syntax and feature presence: OK')
+          ensemble_source = Path('ensembles.py').read_text(encoding='utf-8')
+          ensemble_tree = ast.parse(ensemble_source)
+          ensemble_functions = {n.name for n in ast.walk(ensemble_tree) if isinstance(n, ast.FunctionDef)}
+          assert {'fetch', 'draw', 'show', 'gefs_point', 'fetch_gfs_main'} <= ensemble_functions
+          archive_tree = ast.parse(Path('ensemble_archive.py').read_text(encoding='utf-8'))
+          archive_functions = {n.name for n in ast.walk(archive_tree) if isinstance(n, ast.FunctionDef)}
+          assert {'available_images', 'generate', 'image_path'} <= archive_functions
+          print('ELBTAL syntax and current forecast/ensemble paths: OK')
           PY
