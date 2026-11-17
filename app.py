@@ -618,8 +618,16 @@ def render_fog(X,Y,Z,run,valid):
 st.set_page_config(page_title='ELBTAL Wetterkarten', page_icon='🌦️', layout='wide')
 from v2_style import apply as apply_v2_style
 apply_v2_style()
-st.title(f'🌦️ ELBTAL · Wetterkarten (v{VERSION})')
-st.caption(f'WETTERKARTEN  /  VERSION {VERSION}  /  V2-DESIGNVORSCHAU')
+# Compact, reliable mobile header: avoids Streamlit's oversized h1 wrapping.
+st.markdown(
+    f"""<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;
+    margin:0 0 0.65rem 0;line-height:1.2;">
+    <span style="font-size:clamp(1.12rem,4.6vw,1.65rem);font-weight:800;
+    color:#f3f8ff;white-space:nowrap;">🌦️ ELBTAL · Wetterkarten</span>
+    <span style="font-size:0.82rem;font-weight:700;color:#9cddf1;
+    white-space:nowrap;">(v{VERSION})</span></div>""",
+    unsafe_allow_html=True,
+)
 # Accessible from the APK/WebView even when pull-to-refresh is unavailable.
 # Streamlit reruns the app; this is not a forced browser/WebView hard reload.
 if st.button("🔄 Ansicht aktualisieren", key="elbtal_manual_refresh", help="Aktuelle Modellläufe und Daten neu prüfen"):
