@@ -138,7 +138,8 @@ def recent_runs():
     return [latest-timedelta(hours=i) for i in range(49)]
 
 def show(region,forced_parameter=None):
-    st.subheader(f"ICON-D2-RUC · {region}")
+    if forced_parameter is None:
+        st.subheader(f"ICON-D2-RUC · {region}")
     st.caption("DWD Open Data v1 · stündliche Modellläufe · bis +27 h · native ICON-Gitterdaten. Kein Open-Meteo.")
     runs=recent_runs()
     run=st.selectbox("Modelllauf (UTC)",runs,format_func=lambda d:f"{d:%d.%m.%Y %H} UTC",key="ruc_run")
