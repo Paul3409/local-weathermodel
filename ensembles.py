@@ -86,6 +86,14 @@ def _noaa_get(url,params):
                     time.sleep(1.5*(attempt+1))
                     continue
             response.raise_for_status()
+            if not response.content.startswith(b"GRIB"):
+                preview=response.content[:180].decode("utf-8",errors="replace").replace("\\n"," ")
+                last=RuntimeError(f"NOAA lieferte statt GRIB: HTTP {response.status_code}, "
+                                  f"{len(response.content)} Bytes, {preview!r}")
+                if attempt<2:
+                    time.sleep(1.5*(attempt+1))
+                    continue
+                raise last
             return response
         except requests.RequestException as exc:
             last=exc
@@ -190,7 +198,8 @@ def fetch(model,run,field,lat,lon,steps):
             for future in as_completed(futures):
                 i,j=futures[future]
                 try:data[i,j]=future.result()
-                except Exception as exc:failures.append(str(exc))
+                except Exception as exc:
+                    failures.append(f"+{steps[j]}h / Mitglied {members[i]:02d}: {exc}")
     else:
         for j,step in enumerate(steps):
             try:
