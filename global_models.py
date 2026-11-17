@@ -12,7 +12,7 @@ from scipy.interpolate import griddata
 from icon_eu import REGIONS, LOCAL_TZ, render
 
 PARAMS={"MSLP":"msl","T850":"t","T850 + MSLP":"t","Z500 + MSLP":"z","T2":"2t","Schneehöhe":"sd"}
-HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.0 (educational)"}
+HEADERS={"User-Agent":"MeteoOst-Wetterkarten/1.0 (educational)"}
 
 from model_cycles import recent_cycles
 
