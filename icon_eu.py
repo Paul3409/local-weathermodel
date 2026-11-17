@@ -801,18 +801,37 @@ def show(region, forced_model=None, forced_parameter=None):
                               index=0 if model=="ICON-D2" else 2,key="eu_batch_interval_"+model)
         hours=[h for h in available_hours if first<=h<=last and (h-first)%interval==0]
         st.caption(f"{len(hours)} Karten für {parameter} · {model} · {region}. Fertige Karten erscheinen sofort.")
-        if st.button(f"⚡ {len(hours)} Karten vorladen",key="eu_batch_start_"+model):
-            progress=st.progress(0,text="Karten werden vorbereitet …")
-            completed=0
-            for index,hour in enumerate(hours):
-                _calculate_map(hour)
-                cached=st.session_state.get("eu_batch_maps",{})
-                found=[(k,v) for k,v in cached.items() if k[:4]==(MAP_STYLE_VERSION,model,region,parameter) and k[5]==hour]
-                if found:
-                    valid,png=found[-1][1]
-                    completed+=1
-                progress.progress((index+1)/len(hours),text=f"{index+1}/{len(hours)} verarbeitet · {completed} fertig")
-            st.success(f"{completed}/{len(hours)} Karten fertig. Über die Vorhersagestunde oben einzeln auswählen.")
+        # A fragment runs independently of the forecast-hour slider's full-app reruns.
+    _batch_identity=(MAP_STYLE_VERSION,model,region,parameter)
+    if st.button(f"⚡ {len(hours)} Karten vorladen",key="eu_batch_maps_queue_start"):
+        st.session_state["eu_batch_maps_queue"]={"identity":_batch_identity,"hours":list(hours)}
+
+    @st.fragment(run_every="2s")
+    def _batch_worker():
+        job=st.session_state.get("eu_batch_maps_queue")
+        if not job or job["identity"]!=_batch_identity:
+            return
+        _all=job["hours"]
+        _cache=st.session_state.get("eu_batch_maps",{})
+        def _key(hour):
+            return (MAP_STYLE_VERSION,model,region,parameter,preview_run,hour)
+        _done=sum(_key(h) in _cache for h in _all)
+        if _done<len(_all):
+            hour=next(h for h in _all if _key(h) not in _cache)
+            _calculate_map(hour)
+            _cache=st.session_state.get("eu_batch_maps",{})
+            _done=sum(_key(h) in _cache for h in _all)
+            # A failed forecast hour must not block the remaining hours.
+            if _key(hour) not in _cache:
+                job.setdefault("failed",[]).append(hour)
+                job["hours"]=[h for h in _all if h!=hour]
+        _total=len(_all)+len(job.get("failed",[]))
+        _finished=_done+len(job.get("failed",[]))
+        st.progress(min(1.0,_finished/max(1,_total)),text=f"{_finished}/{_total} verarbeitet · {_done} Karten fertig")
+        if _done>=len(job["hours"]):
+            st.success(f"{_done} Karten vorgeladen. Du kannst sie oben einzeln auswählen.")
+
+    _batch_worker()
     if st.button(f"{model}-Karte manuell berechnen",type="primary"):
         _calculate_map(lead)
     # A batch result remains available when moving the hour slider.
