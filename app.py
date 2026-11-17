@@ -1,6 +1,6 @@
 from map_design import style_figure, frame_png
 # Version shown in the app header (kept here for APK refresh testing).
-VERSION = "1.27.2"
+VERSION = "1.27.5"
 """ELBTAL-T2M v0.5.3 – ESA WorldCover offline land-use raster."""
 import bz2
 import io
