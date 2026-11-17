@@ -443,20 +443,22 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         from matplotlib.colors import LinearSegmentedColormap, ListedColormap, BoundaryNorm
         if mslp is None or mslp.shape!=Z.shape:
             raise RuntimeError("MSLP-Raster fehlt oder hat eine andere Gittergröße.")
-        # Muted Z500 palette with a REAL discontinuity at 552 gpdam:
-        # 551.999 -> green, 552.000 -> yellow. No interpolation across it.
-        lower=LinearSegmentedColormap.from_list("z500_cool_v2",[
-            (0.0,"#503A79"),(.20,"#455D9D"),(.40,"#427EAF"),
-            (.60,"#4A9CB1"),(.78,"#429E83"),(1.0,"#639C56")])
-        upper=LinearSegmentedColormap.from_list("z500_warm_v2",[
-            (0.0,"#E6CE69"),(.25,"#DDB45D"),(.50,"#D68E53"),
-            (.75,"#C66C59"),(1.0,"#A95172")])
+        # ELBTAL V2 design D: strong, differentiated colors without neon.
+        # 551.999 gpdam is green, 552.000 gpdam starts yellow.
+        # Keep the discontinuity and the emphasized black 552 contour.
+        lower=LinearSegmentedColormap.from_list("z500_cool_v2_d",[
+            (0.0,"#173B83"),(.18,"#2065A8"),(.38,"#278BB9"),
+            (.57,"#24B0B6"),(.75,"#22BC85"),(.90,"#48BE56"),
+            (1.0,"#83C848")])
+        upper=LinearSegmentedColormap.from_list("z500_warm_v2_d",[
+            (0.0,"#F4DD43"),(.18,"#F5CB36"),(.38,"#F3A52D"),
+            (.60,"#EB7D2C"),(.80,"#DF5638"),(1.0,"#C43A59")])
         # Each one-gpdam interval has its own color. The 552 boundary is
         # shared by both map contours and the colorbar (no blended band).
         levels=np.arange(480,601,1,dtype=float)
         colors=[lower((v-480)/72) for v in range(480,552)]
         colors += [upper((v-552)/48) for v in range(552,600)]
-        cmap=ListedColormap(colors,name="elbtal_z500_v2_552_split")
+        cmap=ListedColormap(colors,name="elbtal_z500_v2_design_d")
         norm=BoundaryNorm(levels,cmap.N)
         im=ax.contourf(X,Y,Z,levels=levels,cmap=cmap,norm=norm,extend="both")
         pressure=np.ma.masked_invalid(mslp)
