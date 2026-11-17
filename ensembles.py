@@ -2,6 +2,8 @@
 import io
 import os
 import tempfile
+import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 import numpy as np
@@ -72,6 +74,25 @@ def read_point(data,lat,lon,expected):
         if path and os.path.exists(path):os.unlink(path)
     raise RuntimeError(f"Feld {expected} in GRIB nicht gefunden")
 
+def _noaa_get(url,params):
+    """Retry transient NOAA overload; do not cache failed responses."""
+    last=None
+    for attempt in range(3):
+        try:
+            response=requests.get(url,params=params,headers=HEADERS,timeout=(8,35))
+            if response.status_code in (429,500,502,503,504):
+                last=RuntimeError(f"NOAA HTTP {response.status_code}")
+                if attempt<2:
+                    time.sleep(1.5*(attempt+1))
+                    continue
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            last=exc
+            if attempt<2:time.sleep(1.5*(attempt+1))
+    raise RuntimeError(f"NOAA-Abruf fehlgeschlagen: {last}")
+
+
 @st.cache_data(ttl=3600,show_spinner=False)
 def gefs_point(run,step,member,field,lat,lon):
     # Use NOAA's point-sized GRIB subregion for individual members.
@@ -88,12 +109,7 @@ def gefs_point(run,step,member,field,lat,lon):
             f"var_{variable}":"on",f"lev_{level}":"on",
             "subregion":"","leftlon":round(lon-1.1,3),"rightlon":round(lon+1.1,3),
             "toplat":round(lat+1.1,3),"bottomlat":round(lat-1.1,3)}
-    response=requests.get("https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl",
-                          params=params,headers=HEADERS,timeout=45)
-    try:
-        response.raise_for_status()
-    except requests.HTTPError as exc:
-        raise RuntimeError(f"NOAA HTTP {response.status_code}, Lauf {run:%d.%m. %H} UTC, +{step} h, Mitglied {member:02d}: {response.text[:110]}") from exc
+    response=_noaa_get("https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl",params)
     return read_point(response.content,lat,lon,field)
 
 @st.cache_data(ttl=3600,show_spinner=False)
@@ -112,9 +128,7 @@ def gfs_main_point(run,step,field,lat,lon):
             f"var_{variable}":"on",f"lev_{level}":"on",
             "subregion":"","leftlon":round(lon-1.1,3),"rightlon":round(lon+1.1,3),
             "toplat":round(lat+1.1,3),"bottomlat":round(lat-1.1,3)}
-    response=requests.get("https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl",
-                          params=params,headers=HEADERS,timeout=45)
-    response.raise_for_status()
+    response=_noaa_get("https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl",params)
     return read_point(response.content,lat,lon,field)
 
 
@@ -122,7 +136,7 @@ def fetch_gfs_main(run,field,lat,lon,steps):
     """Fetch deterministic GFS in parallel; gaps remain NaN."""
     result=np.full(len(steps),np.nan)
     failures=[]
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         futures={pool.submit(gfs_main_point,run,step,field,lat,lon):i
                  for i,step in enumerate(steps)}
         for future in as_completed(futures):
@@ -319,6 +333,12 @@ def show():
                 available=np.isfinite(values)
                 if not available.any():
                     raise RuntimeError("Keine gültigen Ensemble-Daten erhalten. Bitte einen älteren Modelllauf auswählen.")
+                # Avoid presenting severely incomplete ensemble runs as forecasts.
+                if available.mean()<0.80 or (available.mean(axis=0)<0.65).any():
+                    examples="; ".join(dict.fromkeys(errors[:3]))
+                    raise RuntimeError(f"Nur {available.mean():.0%} Ensemble-Daten vorhanden. "
+                                       f"Diagramm aus Qualitätsgründen nicht gezeichnet. "
+                                       f"Fehlerbeispiele: {examples[:450]}")
                 # Missing points remain NaN; never substitute invented values.
                 main=None
                 if model=="GEFS":
@@ -326,6 +346,8 @@ def show():
                     errors+=main_errors
                     if parameter=="Neuschnee":
                         main=np.maximum(np.diff(main,prepend=np.nan),0)
+                if main is not None and np.isfinite(main).mean()<0.70:
+                    st.warning("GFS-Hauptlauf unvollständig; grüne Linie wird nur an vorhandenen Zeitpunkten gezeigt.")
                 png=draw(model,place,run,FIELDS[parameter],steps,values,precipitation,main=main)
                 st.session_state["ens_manual_result"]=(selection,png,float(available.mean()),len(errors))
         except Exception as exc:
