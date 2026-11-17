@@ -628,11 +628,20 @@ st.markdown(
     white-space:nowrap;">(v{VERSION})</span></div>""",
     unsafe_allow_html=True,
 )
-# Accessible from the APK/WebView even when pull-to-refresh is unavailable.
-# Streamlit reruns the app; this is not a forced browser/WebView hard reload.
-if st.button("🔄 Ansicht aktualisieren", key="elbtal_manual_refresh", help="Aktuelle Modellläufe und Daten neu prüfen"):
-    st.cache_data.clear()
-    st.rerun()
+# Use an actual WebView navigation instead of only rerunning the existing
+# Streamlit session. A changing query string prevents reuse of the old page.
+# This can load newly deployed code, but cannot deploy GitHub commits itself.
+import time as _elbtal_time
+from html import escape as _elbtal_escape
+_reload_token = str(_elbtal_time.time_ns())
+st.markdown(
+    '<a href="?elbtal_reload=' + _elbtal_escape(_reload_token) + '" '
+    'target="_self" style="display:inline-block;padding:0.45rem 0.9rem;'
+    'margin:0 0 0.6rem 0;border:1px solid #3984B8;border-radius:0.55rem;'
+    'background:#123A5D;color:#F3F8FF;font-weight:700;text-decoration:none;">'
+    '🔄 App vollständig neu laden</a>',
+    unsafe_allow_html=True,
+)
 from v2_navigation import show as show_v2_navigation
 if show_v2_navigation():
     st.stop()
