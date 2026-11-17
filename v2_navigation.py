@@ -88,17 +88,13 @@ def show_model_maps():
 def show():
     st.caption("ELBTAL V2 · zentrale Navigation")
     section=dropdown("Bereich", "v2_section",
-                     ["Modelle", "Modellvergleich", "ECMWF-Langfrist", "Ensembles", "Radar", "Elbtal & KRUMET"])
+                     ["Modelle", "Modellvergleich", "Ensembles", "Radar", "Elbtal & KRUMET"])
     if section=="Modelle":
         show_model_maps()
         return True
     if section=="Modellvergleich":
         from v2_comparison import show as show_comparison
         show_comparison()
-        return True
-    if section=="ECMWF-Langfrist":
-        from ecmwf_extended import show as show_extended
-        show_extended()
         return True
     if section=="Ensembles":
         from ensembles import show as show_ensembles
