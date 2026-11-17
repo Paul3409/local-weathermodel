@@ -49,15 +49,22 @@ def generate(model,place,run,horizon,parameter):
         errors+=other_errors
     # A single missing GRIB value must not discard an otherwise useful ensemble.
     # Keep missing points as NaN (visible gaps); never interpolate model values.
-    def complete(values):
-        usable = values[:, 1:] if parameter=="Neuschnee" else values
+    def complete(values, ignore_initial=False):
+        # Accumulations (APCP and snow changes) have no preceding six-hour
+        # interval at forecast step zero; that timestamp is not required.
+        usable = values[:, 1:] if ignore_initial else values
         finite = np.isfinite(usable)
-        return (finite.mean() >= 0.85 and
+        return (finite.size > 0 and finite.mean() >= 0.85 and
                 (finite.mean(axis=0) >= 0.70).all() and
                 (finite.mean(axis=1) >= 0.60).all())
-    if not complete(data) or (precipitation is not None and not complete(precipitation)):
+    temperature_ok=complete(data, ignore_initial=parameter=="Neuschnee")
+    precipitation_ok=(precipitation is None or complete(precipitation, ignore_initial=True))
+    if not temperature_ok or not precipitation_ok:
         valid=int(np.isfinite(data).sum())
-        print(f"NOT READY {model} {place} {parameter}: {valid}/{data.size} values; errors={len(errors)}")
+        precip_valid=(f", precipitation {int(np.isfinite(precipitation[:, 1:]).sum())}/"
+                      f"{precipitation[:, 1:].size}" if precipitation is not None else "")
+        print(f"NOT READY {model} {place} {parameter}: {valid}/{data.size} values"
+              f"{precip_valid}; errors={len(errors)}")
         return False
     path=image_path(model,place,parameter,run,horizon)
     path.parent.mkdir(parents=True,exist_ok=True)
