@@ -196,34 +196,6 @@ def render(values,geo,product,stamp):
     return frame_png(buf.getvalue(),label,"DWD RADOLAN","Deutschland",stamp,stamp,portrait_override=False)
 
 def show():
-    st.subheader("📡 ELBTAL | Regenradar Deutschland")
-    mode=st.segmented_control("Radarprodukt",["Reflektivität (dBZ)","Regenrate (mm/h)"],
-                              default="Reflektivität (dBZ)",key="radar_mode")
-    product="WN" if mode=="Reflektivität (dBZ)" else "RY"
-    st.caption("DWD-Radarverbund · gemessene Radarreflektivität (WN) oder qualitätskorrigierte Niederschlagsmenge (RY), auf mm/h umgerechnet. 1-km-Raster, neue Aufnahme ungefähr alle 5 Minuten. Kein Wettermodell.")
-    try:
-        frames=list_frames(product)
-    except Exception as exc:
-        st.error(f"Radarverzeichnis nicht erreichbar: {exc}")
-        return
-    if not frames:
-        st.warning("Der DWD bietet derzeit keine passenden Radardateien in diesem Verzeichnis an.")
-        return
-    options=list(range(len(frames)))
-    idx=st.select_slider("Radarzeit (MEZ/MESZ)",options=options,value=0,
-                         format_func=lambda i:frames[i][0].astimezone(TZ).strftime("%d.%m.%Y %H:%M %Z"))
-    stamp,url=frames[idx]
-    st.caption(f"Messzeit: {stamp.astimezone(TZ):%d.%m.%Y %H:%M %Z} · UTC {stamp:%H:%M} · kein Vorhersagezeitpunkt")
-    if st.button("📡 Radaraufnahme laden",type="primary"):
-        try:
-            with st.spinner("Originale DWD-Radardaten werden geladen …"):
-                data,geo=load_frame(url,product)
-                png=render(data,geo,product,stamp)
-            st.session_state["radar_image"]=(url,png)
-        except Exception as exc:
-            st.error(f"Radaraufnahme nicht darstellbar: {type(exc).__name__}: {exc}")
-    if st.session_state.get("radar_image",(None,None))[0]==url:
-        png=st.session_state["radar_image"][1]
-        st.image(png,width="stretch")
-        st.download_button("PNG herunterladen",png,file_name=f"ELBTAL_Radar_{product}_{stamp:%Y%m%d_%H%M}.png",mime="image/png")
-    st.caption("Farbskala nach deiner Vorlage. dBZ und mm/h verwenden unterschiedliche physikalische Schwellen. Fehlende oder ungültige Radardaten werden nicht als Regen dargestellt.")
+    """Radar page with all original and extended measurement products."""
+    from radar_extras import show as show_extended_radar
+    return show_extended_radar()
