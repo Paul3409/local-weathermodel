@@ -634,7 +634,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     plt.close(fig)
     return frame_png(output.getvalue(), parameter, model, region, run, valid)
 
-def show(region, forced_model=None):
+def show(region, forced_model=None, forced_parameter=None):
     st.subheader(f"Wettermodelle · {region}")
     model=forced_model or st.segmented_control("Wettermodell",["ICON-EU","ICON-D2","GFS"] if region=="Deutschland" else ["ICON-EU","GFS"],default="ICON-EU",key="synoptic_model")
     st.caption("ICON-D2: Deutschland bis +48 h stündlich (sofern die DWD-Dateien verfügbar sind). ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
@@ -642,7 +642,7 @@ def show(region, forced_model=None):
     choices=(["MSLP","T850","T850 + MSLP","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","T850 + MSLP","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","T850 + MSLP","Z500 + MSLP"])
     choices += ["Neuschneemenge","Schneehöhe"]
     if "Windchill" not in choices: choices.append("Windchill")
-    parameter=st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
+    parameter=forced_parameter if forced_parameter in choices else st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
     if parameter=="Neuschneemenge":
         st.caption("ICON: aus akkumuliertem Schneewasseräquivalent (SNOW_GSP + SNOW_CON), 10:1-Umrechnung; Schätzung, keine prognostizierte Schneedeckenänderung. GFS: akkumulierte Schneefallhöhe (ASNOW), falls verfügbar.")
     elif parameter=="Schneehöhe":
@@ -650,7 +650,7 @@ def show(region, forced_model=None):
     elif parameter=="Windchill":
         st.caption("Berechnete Windchill-Temperatur aus 2-m-Lufttemperatur und 10-m-Wind (U/V), nicht aus Böen. Formel nur bei ≤ 10 °C und Wind > 4,8 km/h; sonst Lufttemperatur. Keine vollständige gefühlte Temperatur (Sonne/Feuchte fehlen).")
     from model_cycles import recent_cycles
-    run_options=recent_cycles(model)
+    run_options=recent_cycles(model, count=9)
     run_choice=st.selectbox(
         "Modelllauf auswählen · vier letzte berechnete Zyklen (UTC)",
         options=[None]+run_options,
