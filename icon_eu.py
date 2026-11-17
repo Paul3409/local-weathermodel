@@ -519,9 +519,19 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         # Highlight the freezing-level isotherm without changing the temperature field.
         ax.contour(X,Y,Z,levels=[0],colors="#111827",linewidths=1.15)
         if parameter=="T850 + MSLP":
-            if mslp is None or mslp.shape!=Z.shape or not 850<float(np.nanmedian(mslp))<1100:
-                raise RuntimeError("MSLP-Raster für weiße Isobaren fehlt oder ist ungültig.")
-            lines=ax.contour(X,Y,mslp,levels=np.arange(940,1081,4),
+            if mslp is None or mslp.shape!=Z.shape:
+                raise RuntimeError("MSLP-Raster für weiße Isobaren fehlt oder hat eine andere Gittergröße.")
+            # On ICON-EU's expanded Atlantic map, NaN outside the model domain
+            # is intentional. Validate only actual pressure values, not the
+            # masked no-data area; never fill the area with invented pressure.
+            pressure_values=np.asarray(np.ma.filled(np.ma.masked_invalid(mslp),np.nan),dtype=float)
+            finite_pressure=pressure_values[np.isfinite(pressure_values)]
+            if finite_pressure.size==0:
+                raise RuntimeError("MSLP enthält keine gültigen Werte im gewählten Kartenausschnitt.")
+            pressure_median=float(np.median(finite_pressure))
+            if not 850<pressure_median<1100:
+                raise RuntimeError(f"MSLP-Isobaren unplausibel: Median {pressure_median:.1f} hPa.")
+            lines=ax.contour(X,Y,np.ma.masked_invalid(mslp),levels=np.arange(940,1081,4),
                              colors="white",linewidths=1.05,alpha=.98)
             ax.clabel(lines,inline=True,fontsize=7,fmt="%d",colors="white")
         label="Temperatur auf 850 hPa (°C)" + (" · weiße MSLP-Isobaren (hPa)" if parameter=="T850 + MSLP" else "")
