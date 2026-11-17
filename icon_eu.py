@@ -23,8 +23,8 @@ BASE = "https://opendata.dwd.de/weather/nwp/icon-eu/grib"
 COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson"
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Mitteleuropa": (2.0, 27.0, 44.0, 58.0), "Europa & Nordatlantik": (-65.0, 65.0, 32.0, 72.0)}
-HEADERS = {"User-Agent": "ELBTAL weather visualization (educational)"}
-MAP_STYLE_VERSION = "windchill-v1"
+HEADERS = {"User-Agent": "MeteoOst weather visualization (educational)"}
+MAP_STYLE_VERSION = "meteoost-brand-v1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -443,7 +443,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         from matplotlib.colors import LinearSegmentedColormap, ListedColormap, BoundaryNorm
         if mslp is None or mslp.shape!=Z.shape:
             raise RuntimeError("MSLP-Raster fehlt oder hat eine andere Gittergröße.")
-        # ELBTAL V2 design D: strong, differentiated colors without neon.
+        # MeteoOst V2 design D: strong, differentiated colors without neon.
         # 551.999 gpdam is green, 552.000 gpdam starts yellow.
         # Keep the discontinuity and the emphasized black 552 contour.
         # Shift the cool hues towards stronger blue already at 510-525 gpdam,
@@ -462,7 +462,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         levels=np.arange(480,601,1,dtype=float)
         colors=[lower((v-480)/72) for v in range(480,552)]
         colors += [upper((v-552)/48) for v in range(552,600)]
-        cmap=ListedColormap(colors,name="elbtal_z500_v2_design_d_plus")
+        cmap=ListedColormap(colors,name="meteoost_z500_v2_design_d_plus")
         norm=BoundaryNorm(levels,cmap.N)
         im=ax.contourf(X,Y,Z,levels=levels,cmap=cmap,norm=norm,extend="both")
         pressure=np.ma.masked_invalid(mslp)
@@ -495,7 +495,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             (1060,"#410C30"),
         ]
         cmap=LinearSegmentedColormap.from_list(
-            "elbtal_mslp_vivid",
+            "meteoost_mslp_vivid",
             [((pressure-950)/110,color) for pressure,color in pressure_anchors],
             N=512,
         )
@@ -527,7 +527,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             (30.0,"#9937B8"),  # purple
         ]
         cmap=LinearSegmentedColormap.from_list(
-            "elbtal_t850",
+            "meteoost_t850",
             [((value+30)/60,color) for value,color in anchors],
             N=512,
         )
@@ -581,7 +581,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             label="Niederschlagssumme seit Modellstart (mm = l/m²)"
         else:
             raise RuntimeError(f"Unbekannter Parameter: {parameter}")
-        cmap=LinearSegmentedColormap.from_list("elbtal_germany",[((v-vmin)/(vmax-vmin),color) for v,color in stops],N=2048)
+        cmap=LinearSegmentedColormap.from_list("meteoost_germany",[((v-vmin)/(vmax-vmin),color) for v,color in stops],N=2048)
         norm=Normalize(vmin=vmin,vmax=vmax)
         im=ax.contourf(X,Y,Z,levels=np.linspace(vmin,vmax,161),cmap=cmap,norm=norm,extend="both")
         if parameter in ("2-m-Temperatur","Taupunkt","Windchill"):
