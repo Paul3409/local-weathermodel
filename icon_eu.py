@@ -803,7 +803,6 @@ def show(region, forced_model=None, forced_parameter=None):
         st.caption(f"{len(hours)} Karten für {parameter} · {model} · {region}. Fertige Karten erscheinen sofort.")
         if st.button(f"⚡ {len(hours)} Karten vorladen",key="eu_batch_start_"+model):
             progress=st.progress(0,text="Karten werden vorbereitet …")
-            gallery=st.container()
             completed=0
             for index,hour in enumerate(hours):
                 _calculate_map(hour)
@@ -811,9 +810,6 @@ def show(region, forced_model=None, forced_parameter=None):
                 found=[(k,v) for k,v in cached.items() if k[:4]==(MAP_STYLE_VERSION,model,region,parameter) and k[5]==hour]
                 if found:
                     valid,png=found[-1][1]
-                    with gallery:
-                        st.caption(f"+{hour} h · {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
-                        st.image(png,width="stretch")
                     completed+=1
                 progress.progress((index+1)/len(hours),text=f"{index+1}/{len(hours)} verarbeitet · {completed} fertig")
             st.success(f"{completed}/{len(hours)} Karten fertig. Über die Vorhersagestunde oben einzeln auswählen.")
