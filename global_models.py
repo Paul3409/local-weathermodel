@@ -213,7 +213,9 @@ def show(region, forced_model=None):
         key="global_lead_"+model)
     parameters=["MSLP","T850","T850 + MSLP","Z500 + MSLP","MSLP-Anomalie"]
     if model=="ECMWF IFS":parameters+=["T2","Schneehöhe"]
-    parameter=st.radio("Parameter",parameters,horizontal=True,key="global_parameter_"+model)\n    if parameter=="Schneehöhe":\n        st.caption("ECMWF-Schneehöhe in cm, berechnet aus Schneewasseräquivalent (sd) und prognostizierter Schneedichte (rsn).")
+    parameter=st.radio("Parameter",parameters,horizontal=True,key="global_parameter_"+model)
+    if parameter=="Schneehöhe":
+        st.caption("ECMWF-Schneehöhe in cm, berechnet aus Schneewasseräquivalent (sd) und prognostizierter Schneedichte (rsn).")
     if parameter=="MSLP-Anomalie":
         st.caption("Referenz: NOAA PSL NCEP/NCAR Reanalysis 1, Monatsmittel 1991–2020 (2,5°). Automatischer Download; Monatsklimatologie, kein tagesgenauer ERA5-Vergleich.")
     if st.button("Globale Karte berechnen",type="primary",key="global_generate"):
