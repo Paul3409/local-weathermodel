@@ -11,7 +11,7 @@ from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_
 from scipy.interpolate import griddata
 from icon_eu import REGIONS, LOCAL_TZ, render
 
-PARAMS={"MSLP":"msl","T850":"t","T850 + MSLP":"t","Z500 + MSLP":"z"}
+PARAMS={"MSLP":"msl","T850":"t","T850 + MSLP":"t","Z500 + MSLP":"z","T2":"2t","Schneehöhe":"sd"}
 HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.0 (educational)"}
 
 from model_cycles import recent_cycles
@@ -80,7 +80,7 @@ def decode(raw,valid,bounds,parameter):
                     if mask.sum()<10:continue
                     vals=vals[mask]
                     if parameter=="msl":vals=vals/100
-                    elif parameter=="t":vals=vals-273.15
+                    elif parameter in ("t","2t"):vals=vals-273.15
                     elif parameter=="z":
                         # ECMWF z is geopotential (m2/s2), NOAA HGT is height (m).
                         short=str(codes_get(gid,"shortName"))
@@ -100,6 +100,13 @@ def decode(raw,valid,bounds,parameter):
     raise RuntimeError("GRIB enthält kein passendes Feld für den gewählten Gültigkeitszeitpunkt.")
 
 def get_field(model,run,lead,parameter,bounds):
+    if model=="ECMWF IFS" and parameter=="sd":
+        # ECMWF sd is metres of water equivalent, not snow depth in metres.
+        # Combine with forecast snow density (kg/m³) for physical depth in cm.
+        X,Y,swe=decode(ecmwf_bytes(run,lead,"sd"),run+timedelta(hours=lead),bounds,"sd")
+        _,_,density=decode(ecmwf_bytes(run,lead,"rsn"),run+timedelta(hours=lead),bounds,"rsn")
+        snow_cm=np.where((swe>0)&(density>0),100000*np.maximum(swe,0)/np.maximum(density,1),0)
+        return X,Y,snow_cm
     raw=ecmwf_bytes(run,lead,parameter) if model=="ECMWF IFS" else gefs_bytes(run,lead,parameter,bounds)
     return decode(raw,run+timedelta(hours=lead),bounds,parameter)
 
@@ -204,7 +211,9 @@ def show(region, forced_model=None):
     lead=st.select_slider("Prognosestunde",options=options,value=options[min(2,len(options)-1)],
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="global_lead_"+model)
-    parameter=st.radio("Parameter",["MSLP","T850","T850 + MSLP","Z500 + MSLP","MSLP-Anomalie"],horizontal=True,key="global_parameter_"+model)
+    parameters=["MSLP","T850","T850 + MSLP","Z500 + MSLP","MSLP-Anomalie"]
+    if model=="ECMWF IFS":parameters+=["T2","Schneehöhe"]
+    parameter=st.radio("Parameter",parameters,horizontal=True,key="global_parameter_"+model)\n    if parameter=="Schneehöhe":\n        st.caption("ECMWF-Schneehöhe in cm, berechnet aus Schneewasseräquivalent (sd) und prognostizierter Schneedichte (rsn).")
     if parameter=="MSLP-Anomalie":
         st.caption("Referenz: NOAA PSL NCEP/NCAR Reanalysis 1, Monatsmittel 1991–2020 (2,5°). Automatischer Download; Monatsklimatologie, kein tagesgenauer ERA5-Vergleich.")
     if st.button("Globale Karte berechnen",type="primary",key="global_generate"):
@@ -219,7 +228,7 @@ def show(region, forced_model=None):
                 if parameter=="MSLP-Anomalie":
                     baseline=climatology_on_grid(X,Y,valid.month)
                     png=anomaly_map(X,Y,Z,baseline,region,model,run,valid)
-                else:png=render(X,Y,Z,region,parameter,run,valid,model=model,mslp=mslp)
+                else:png=render(X,Y,Z,region,"2-m-Temperatur" if parameter=="T2" else parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["global_map"]=(model,region,run,lead,parameter,valid,png)
         except Exception as exc:
             st.error(f"Modellabruf fehlgeschlagen: {type(exc).__name__}: {exc}")
