@@ -681,13 +681,9 @@ def show(region, forced_model=None, forced_parameter=None):
     elif parameter=="Windchill":
         st.caption("Berechnete Windchill-Temperatur aus 2-m-Lufttemperatur und 10-m-Wind (U/V), nicht aus Böen. Formel nur bei ≤ 10 °C und Wind > 4,8 km/h; sonst Lufttemperatur. Keine vollständige gefühlte Temperatur (Sonne/Feuchte fehlen).")
     from model_cycles import recent_cycles
-    run_options=recent_cycles(model, count=9)
-    run_choice=st.selectbox(
-        "Modelllauf auswählen · vier letzte berechnete Zyklen (UTC)",
-        options=[None]+run_options,
-        format_func=lambda r: "Automatisch · jüngster verfügbarer Lauf" if r is None else f"{r:%d.%m.%Y %H} UTC",
-        key="eu_run_"+model,
-    )
+    from v2_model_runs import run_picker, candidates
+    run_choice=run_picker(model,"eu_run_"+model,allow_auto=True)
+    run_options=candidates(model)
     preview_run=run_choice or run_options[0]
     lead=st.select_slider(
         "Vorhersagestunde · Datum und Uhrzeit (MEZ/MESZ)",
