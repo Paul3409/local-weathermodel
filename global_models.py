@@ -248,7 +248,6 @@ def show(region, forced_model=None, forced_parameter=None):
     st.caption(f"{len(_hours)} Karten · fertig berechnete Karten erscheinen sofort.")
     if st.button(f"⚡ {len(_hours)} Karten vorladen",key="global_map_batch_start"):
         _progress=st.progress(0)
-        _gallery=st.container()
         _ok=0
         for _i,_hour in enumerate(_hours):
             _batch_key=(model,region,run,_hour,parameter)
@@ -257,9 +256,6 @@ def show(region, forced_model=None, forced_parameter=None):
                 _calculate_one(_hour)
                 _cached=st.session_state.get("global_map_batch",{})
             if _batch_key in _cached:
-                with _gallery:
-                    st.caption(f"+{_hour} h · {(run+timedelta(hours=_hour)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
-                    st.image(_cached[_batch_key],width="stretch")
                 _ok+=1
             _progress.progress((_i+1)/len(_hours),text=f"{_i+1}/{len(_hours)} verarbeitet · {_ok} fertig")
         st.success(f"{_ok}/{len(_hours)} Karten verfügbar.")
