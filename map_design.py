@@ -117,7 +117,7 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
                (cx+u(21),cy-u(11),cx+u(64),cy+u(31))]:
         d.arc(xy,180,355,fill=CYAN,width=lw)
     d.line((cx-u(28),cy+u(27),cx+u(55),cy+u(27)),fill=CYAN,width=lw)
-    text(125,7,"ELBTAL",32,bold=True)
+    text(125,7,"MeteoOst",32,bold=True)
     text(128,49,"W E T T E R K A R T E N",9,CYAN,True)
     d.line((u(335),u(13),u(335),u(65)),fill="#2C8DB3",width=max(1,u(1)))
     title = str(parameter)
@@ -186,7 +186,7 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
     source_label = "DWD RADOLAN" if model == "DWD RADOLAN" else f"{src} ({model})"
     text(19,fy+9,f"Daten: {source_label}    |    Region: {region}",12,MUTED)
     from app_version import VERSION
-    brand=f"ELBTAL V{VERSION}"
+    brand=f"MeteoOst V{VERSION}"
     bb=d.textbbox((0,0),brand,font=_font(u(13),True))
     d.text((width-u(19)-(bb[2]-bb[0]),u(fy+9)),brand,font=_font(u(13),True),fill=MUTED)
     output=io.BytesIO()
