@@ -94,7 +94,7 @@ def show_model_maps():
             st.caption(note)
 
 def show():
-    st.caption("ELBTAL V2 · zentrale Navigation")
+    st.caption("MeteoOst V2 · zentrale Navigation")
     section=dropdown("Bereich", "v2_section",
                      ["Modelle", "Modellvergleich", "Ensembles", "Radar"])
     if section=="Modelle":
