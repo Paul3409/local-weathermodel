@@ -48,6 +48,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libeccodes0 libeccodes-dev
           pip install -r requirements.txt
+      - name: One-time rebuild of GEFS 06 UTC T2 precipitation graphic
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          from ensemble_archive import generate, image_path
+          run=datetime(2026,11,17,6,tzinfo=timezone.utc)
+          model='GEFS'
+          place='Mühlberg (Elbe)'
+          parameter='T2 + Niederschlag'
+          horizon=384
+          target=image_path(model,place,parameter,run,horizon)
+          print(f"REBUILD {target}",flush=True)
+          # Rebuild the existing PNG using the corrected renderer and cached
+          # NOAA ensemble values; preserve old PNG if inputs are incomplete.
+          import tempfile
+          if target.exists():
+              backup=target.with_suffix('.png.bak')
+              target.rename(backup)
+          else:
+              backup=None
+          try:
+              ok=generate(model,place,run,horizon,parameter)
+              if not ok:
+                  print("DEFERRED: incomplete source data",flush=True)
+                  if backup: backup.rename(target)
+              elif backup:
+                  backup.unlink()
+          except Exception:
+              if backup and backup.exists(): backup.rename(target)
+              raise
+          PY
       - name: Generate the latest available ensemble PNGs
         env:
           MODEL: ${{ github.event.inputs.model || 'GEFS' }}
