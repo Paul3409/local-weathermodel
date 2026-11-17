@@ -217,4 +217,4 @@ def show(region,forced_parameter=None):
     result=st.session_state.get("ruc_map")
     if result and result[:4]==(region,run,lead,parameter):
         st.image(result[5],use_container_width=True)
-        st.download_button("PNG herunterladen",result[5],file_name=f"ELBTAL_ICON-D2-RUC_{parameter}_{result[4]:%Y%m%d%H}.png",mime="image/png")
+        st.download_button("PNG herunterladen",result[5],file_name=f"MeteoOst_ICON-D2-RUC_{parameter}_{result[4]:%Y%m%d%H}.png",mime="image/png")
