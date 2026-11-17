@@ -259,10 +259,38 @@ def show():
     from PIL import Image
     from ensemble_archive import image_path
     archive_path=image_path(model,place,parameter,run,horizon)
+    selection=(model,place,parameter,run.isoformat(),horizon)
     if archive_path.is_file():
-        st.image(str(archive_path),width="stretch")
+        st.image(str(archive_path),use_container_width=True)
         st.download_button("PNG herunterladen",archive_path.read_bytes(),
                            file_name=archive_path.name,mime="image/png")
     else:
-        st.info("Dieses Ensemble-PNG ist noch nicht vorab berechnet oder der Lauf ist noch unvollständig. Die automatische GitHub-Aktion prüft die Daten erneut.")
-        st.caption("Zurzeit werden zuerst GEFS-Diagramme für Mühlberg (Elbe) automatisch vorbereitet. Weitere Orte und ECMWF ENS folgen nach dem Laufzeit- und Speichercheck.")
+        st.info("Für diese Auswahl liegt noch kein vorab berechnetes Ensemble vor.")
+    st.caption("Manuelle Berechnung lädt Originaldaten von NOAA bzw. ECMWF. Besonders GEFS mit vielen Mitgliedern kann mehrere Minuten benötigen.")
+    if st.button("📈 Ensemble jetzt berechnen & anzeigen",type="primary",use_container_width=True,key="ens_calculate"):
+        try:
+            with st.spinner("Ensemble-Daten abrufen und Diagramm zeichnen …"):
+                values,errors=fetch(model,run,FIELDS[parameter],lat,lon,steps)
+                if parameter=="Neuschnee":
+                    values=np.maximum(np.diff(values,axis=1,prepend=np.nan),0)
+                precipitation=None
+                if parameter=="T2 + Niederschlag":
+                    precipitation,extra_errors=fetch(model,run,"precip",lat,lon,steps)
+                    errors+=extra_errors
+                available=np.isfinite(values)
+                if not available.any():
+                    raise RuntimeError("Keine gültigen Ensemble-Daten erhalten. Bitte einen älteren Modelllauf auswählen.")
+                # Missing points remain NaN; never substitute invented values.
+                png=draw(model,place,run,FIELDS[parameter],steps,values,precipitation)
+                st.session_state["ens_manual_result"]=(selection,png,float(available.mean()),len(errors))
+        except Exception as exc:
+            st.session_state.pop("ens_manual_result",None)
+            st.error(f"Berechnung fehlgeschlagen: {exc}")
+    manual=st.session_state.get("ens_manual_result")
+    if manual is not None and manual[0]==selection:
+        _,png,coverage,error_count=manual
+        st.image(png,caption=f"Manuell berechnet · Datenabdeckung {coverage:.1%}",use_container_width=True)
+        if error_count:
+            st.warning(f"{error_count} Datenabrufe fehlgeschlagen; fehlende Werte bleiben als Lücken sichtbar.")
+        st.download_button("Berechnetes Ensemble als PNG herunterladen",png,
+                           file_name="ELBTAL_Ensemble_manuell.png",mime="image/png",key="ens_manual_download")
