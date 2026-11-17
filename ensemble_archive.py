@@ -1,4 +1,4 @@
-"""Stable paths and offline generation of ELBTAL ensemble PNG files."""
+"""Stable paths and offline generation of MeteoOst ensemble PNG files."""
 import argparse
 import json
 import os
