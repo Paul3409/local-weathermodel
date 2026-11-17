@@ -1,149 +1,176 @@
-"""ECMWF extended-range weekly anomaly charts via official OpenCharts API.
+"""Official ECMWF extended-range anomaly maps via public ecCharts WMS.
 
-These are original ECMWF forecast graphics (not locally calculated anomaly
-grids). No Open-Meteo, fabricated values or unlicensed data sources.
+Only layers actually advertised by ECMWF's public GetCapabilities document
+are selectable. No invented forecast data or unverified layer identifiers.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
+from io import BytesIO
 from urllib.parse import urlparse
+import xml.etree.ElementTree as ET
+
 import requests
 import streamlit as st
 
-API="https://charts.ecmwf.int/opencharts-api/v1/"
-HEADERS={"User-Agent":"ELBTAL-Wetterkarten/2.0"}
-PARAMETERS={
-    "Temperaturanomalie (2 m)":("temperature","2m","2-m","2 metre","2 metre","2mt"),
-    "Niederschlagsanomalie":("precipitation","rainfall","precip"),
-    "Luftdruckanomalie (MSLP)":("mslp","mean sea level pressure","pressure"),
+WMS = "https://eccharts.ecmwf.int/wms/"
+HEADERS = {"User-Agent": "ELBTAL-Wetterkarten/2.0"}
+PARAMETERS = {
+    "Temperaturanomalie (2 m)": ("2m", "2 m", "2 metre", "2 meter", "temperature", "temperatur"),
+    "Niederschlagsanomalie": ("precip", "rainfall", "niederschlag"),
+    "Luftdruckanomalie (MSLP)": ("mslp", "mean sea level", "pressure", "luftdruck"),
 }
-WEEK_STEPS=[168,336,504,672,840,1008]
+EXTENDED = ("extended", "weekly", "week", "subseason", "sub-season", "monthly", "46-day", "46 day", "ec46")
+ANOMALY = ("anomal", "departure", "deviation")
 
-def _request_json(url,params=None):
-    r=requests.get(url,params=params,headers=HEADERS,timeout=(6,22))
-    if r.status_code == 404 and url.rstrip("/") == (API+"products").rstrip("/"):
-        raise RuntimeError("Der von ECMWF dokumentierte OpenCharts-Produktkatalog liefert HTTP 404. Die Schnittstelle ist derzeit unter dieser Adresse nicht verfügbar.")
-    r.raise_for_status()
-    result=r.json()
-    if isinstance(result,dict) and result.get("error"):
-        raise RuntimeError(str(result["error"]))
-    return result
 
-@st.cache_data(ttl=3600,show_spinner=False)
-def catalogue():
-    result=_request_json(API+"products/")
-    if isinstance(result,dict):
-        result=result.get("products") or result.get("results") or result.get("data") or []
-    if isinstance(result,dict):
-        result=list(result.values())
-    if not isinstance(result,list):
-        raise RuntimeError("ECMWF hat einen unerwarteten Produktkatalog zurückgegeben.")
-    return result
+def _tag(element):
+    return element.tag.rsplit("}", 1)[-1]
 
-def _name(entry):
-    if not isinstance(entry,dict):return ""
-    return str(entry.get("name") or entry.get("id") or entry.get("product") or entry.get("slug") or "")
 
-def _description(entry):
-    if not isinstance(entry,dict):return ""
-    return " ".join(str(entry.get(k,"")) for k in ("name","title","description","label","category","tags","type","group")).lower()
+def _child(element, name):
+    return next((node for node in element if _tag(node) == name), None)
 
-def discover_products(parameter):
-    """Show only actual ECMWF catalog products; never invent product IDs."""
-    keywords=PARAMETERS[parameter]
-    found=[]
-    for item in catalogue():
-        name=_name(item)
-        desc=_description(item)
-        if not name or not any(word in desc for word in keywords):
+
+def _value(element, name):
+    child = _child(element, name)
+    return (child.text or "").strip() if child is not None else ""
+
+
+def _dimension(element, name):
+    for node in element:
+        if _tag(node) in ("Dimension", "Extent") and node.attrib.get("name", "").lower() == name:
+            return (node.text or "").strip()
+    return ""
+
+
+def _times(value):
+    """Use only explicitly advertised timestamps; never fabricate forecast dates."""
+    if not value:
+        return []
+    result = []
+    for item in value.split(","):
+        item = item.strip()
+        if not item or "/" in item:
+            continue  # ISO interval expansion needs a separate verified implementation.
+        try:
+            parsed = datetime.fromisoformat(item.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            result.append((parsed, item))
+        except ValueError:
             continue
-        # Extended-range weekly anomalies only. Prevent accidentally
-        # presenting a daily or medium-range chart as an EC46 forecast.
-        if not any(word in desc for word in ("extended","weekly","week","46d","46-day","subseason","sub-season","monthly")):
+    return sorted(set(result))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def capabilities():
+    response = requests.get(
+        WMS,
+        params={"service": "WMS", "request": "GetCapabilities", "version": "1.3.0", "token": "public"},
+        headers=HEADERS, timeout=(8, 35),
+    )
+    response.raise_for_status()
+    try:
+        root = ET.fromstring(response.content)
+    except ET.ParseError as exc:
+        raise RuntimeError("ECMWF liefert kein gültiges WMS-Fähigkeitsdokument.") from exc
+    if _tag(root) not in ("WMS_Capabilities", "WMT_MS_Capabilities"):
+        raise RuntimeError("ECMWF liefert kein WMS-Fähigkeitsdokument.")
+    layers = []
+    def walk(node, inherited_time=""):
+        current_time = _dimension(node, "time") or inherited_time
+        name = _value(node, "Name")
+        if name:
+            title = _value(node, "Title") or name
+            abstract = _value(node, "Abstract")
+            layers.append({"name": name, "title": title, "abstract": abstract, "time": current_time})
+        for child in node:
+            if _tag(child) == "Layer":
+                walk(child, current_time)
+    for node in root.iter():
+        if _tag(node) == "Capability":
+            top = _child(node, "Layer")
+            if top is not None:
+                walk(top)
+            break
+    return layers
+
+
+def matching_layers(parameter, layers):
+    found = []
+    for layer in layers:
+        description = " ".join(str(layer.get(k, "")) for k in ("name", "title", "abstract")).lower()
+        if not any(term in description for term in PARAMETERS[parameter]):
             continue
-        if not any(word in desc for word in ("anomal","departure","deviation")):
+        if not any(term in description for term in EXTENDED):
             continue
-        found.append((name,str(item.get("title") or item.get("description") or name)))
+        if not any(term in description for term in ANOMALY):
+            continue
+        found.append(layer)
     return found
 
-@st.cache_data(ttl=1800,show_spinner=False)
-def chart_metadata(product,step,projection):
-    params={"step":step}
-    if projection:
-        params["projection"]=projection
-    data=_request_json(API+f"products/{product}/",params=params)
-    if not isinstance(data,dict):
-        raise RuntimeError("Ungültige Antwort der ECMWF-Kartenschnittstelle.")
-    record=data.get("data") or data
-    if isinstance(record,list):
-        record=next((item for item in record if isinstance(item,dict)),{})
-    if not isinstance(record,dict):
-        raise RuntimeError("ECMWF hat keine gültigen Kartenmetadaten geliefert.")
-    link=record.get("link") or record.get("url") or record.get("image") or {}
-    url=link.get("href") or link.get("url") if isinstance(link,dict) else link
-    attributes=record.get("attributes") or {}
-    if not isinstance(url,str) or urlparse(url).scheme!="https" or urlparse(url).hostname not in ("charts.ecmwf.int","www.ecmwf.int"):
-        raise RuntimeError("ECMWF hat keine gültige Kartenadresse geliefert.")
-    return url,str(attributes.get("description") or ""),str(attributes.get("title") or product)
 
-@st.cache_data(ttl=1800,show_spinner=False)
-def download_chart(url):
-    if urlparse(url).scheme!="https" or urlparse(url).hostname not in ("charts.ecmwf.int","www.ecmwf.int"):
-        raise ValueError("Unerwarteter Kartenserver.")
-    r=requests.get(url,headers=HEADERS,timeout=(6,35))
-    r.raise_for_status()
-    if not r.content.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise RuntimeError("Der ECMWF-Server hat kein PNG-Bild geliefert.")
-    if len(r.content)>20_000_000:
-        raise RuntimeError("Die Bilddatei ist unerwartet groß.")
-    return r.content
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_map(layer_name, valid_time, area):
+    # WMS 1.3.0 EPSG:4326 axis order is south,west,north,east.
+    bbox = {"Europa": "30,-25,72,45", "Mitteleuropa": "45,3,57,22"}[area]
+    params = {
+        "service": "WMS", "request": "GetMap", "version": "1.3.0",
+        "token": "public", "layers": layer_name, "styles": "",
+        "crs": "EPSG:4326", "bbox": bbox, "width": 1100, "height": 800,
+        "format": "image/png", "transparent": "false", "time": valid_time,
+    }
+    response = requests.get(WMS, params=params, headers=HEADERS, timeout=(8, 50))
+    response.raise_for_status()
+    if not response.content.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+        snippet = response.text[:250] if "xml" in response.headers.get("Content-Type", "").lower() else ""
+        raise RuntimeError("ECMWF liefert für diese Ebene und Zeit keine PNG-Karte. " + snippet)
+    if len(response.content) > 20_000_000:
+        raise RuntimeError("Die ECMWF-Karte ist unerwartet groß.")
+    return response.content
+
 
 def show():
     from v2_navigation import dropdown
     st.subheader("🗓️ ECMWF-Langfristkarten")
-    st.caption("Offizielle ECMWF-OpenCharts · Wochenanomalien bis zu 46 Tage · keine künstlich berechneten Daten.")
-    parameter=dropdown("1. Parameter","v2_ec46_parameter",list(PARAMETERS))
+    st.caption("Offizielle ECMWF-ecCharts-Karten über den öffentlichen WMS-Dienst. Nur tatsächlich freigegebene Karten werden angeboten.")
+    parameter = dropdown("1. Parameter", "v2_ec46_parameter", list(PARAMETERS))
     try:
-        with st.spinner("Offizielle ECMWF-Kartenprodukte suchen …"):
-            products=discover_products(parameter)
-    except (requests.RequestException,ValueError,RuntimeError) as exc:
-        st.warning(f"ECMWF-OpenCharts kann aktuell nicht automatisch geladen werden: {exc}")
-        st.info("Die offiziellen ECMWF-Langfristkarten können weiterhin direkt im ECMWF-Kartenbrowser geprüft werden. ELBTAL zeigt bewusst keine erfundenen Ersatzkarten.")
-        st.link_button("Offizielle ECMWF-Karten öffnen","https://charts.ecmwf.int/")
+        with st.spinner("ECMWF-WMS-Kartenebenen abrufen …"):
+            layers = matching_layers(parameter, capabilities())
+    except (requests.RequestException, RuntimeError) as exc:
+        st.warning(f"Der öffentliche ECMWF-WMS-Dienst ist derzeit nicht erreichbar: {exc}")
+        st.link_button("ECMWF-Kartenbrowser öffnen", "https://charts.ecmwf.int/")
         return
-    if not products:
-        st.info("Für diesen Parameter wurde im öffentlichen ECMWF-Katalog kein eindeutig zuordenbares Wochenanomalie-Produkt gefunden. Es werden keine Ersatzdaten oder erfundenen Karten angezeigt.")
-        st.link_button("ECMWF-Langfristkarten ansehen","https://charts.ecmwf.int/")
+    if not layers:
+        st.info("ECMWF stellt für diesen Parameter derzeit keine eindeutig als Wochenanomalie erkennbare Ebene im öffentlichen WMS bereit. Eine Zugangsbeschränkung ist möglich.")
+        st.link_button("Offizielle ECMWF-Langfristkarten öffnen", "https://charts.ecmwf.int/")
         return
-    names=[name for name,_ in products]
-    labels=dict(products)
-    product=dropdown("2. ECMWF-Kartenprodukt","v2_ec46_product",names)
-    st.caption(labels[product])
-    week=dropdown("3. Prognosewoche","v2_ec46_week",
-                  [f"Woche {i} · Tage {7*i-6}–{7*i}" for i in range(1,7)])
-    index=int(week.split()[1])
-    # ECMWF API accepts 'step' as a forecast lead. The response metadata
-    # is shown so users can verify the actual period provided by ECMWF.
-    step=WEEK_STEPS[index-1]
-    projection=dropdown("4. Kartengebiet","v2_ec46_area",
-                        ["Europa","Mitteleuropa"])
-    projection_id={"Europa":"opencharts_europe","Mitteleuropa":"opencharts_central_europe"}[projection]
-    if st.button("ECMWF-Wochenkarte laden",type="primary",use_container_width=True):
+    names = [layer["name"] for layer in layers]
+    selected = dropdown("2. ECMWF-Kartenebene", "v2_ec46_layer", names)
+    layer = next(item for item in layers if item["name"] == selected)
+    st.caption(layer["title"])
+    times = _times(layer["time"])
+    if not times:
+        st.info("Für diese Ebene meldet ECMWF keine einzeln auswählbaren Gültigkeitszeiten. Es wird keine Prognosewoche geraten.")
+        st.link_button("Karte bei ECMWF ansehen", "https://charts.ecmwf.int/")
+        return
+    choices = {f"{dt:%d.%m.%Y %H:%M} UTC": raw for dt, raw in times}
+    chosen = dropdown("3. Gültigkeitszeit", "v2_ec46_valid_time", list(choices))
+    area = dropdown("4. Kartengebiet", "v2_ec46_area", ["Europa", "Mitteleuropa"])
+    if st.button("ECMWF-Wochenkarte laden", type="primary", use_container_width=True):
         try:
-            with st.spinner("ECMWF-Wochenkarte laden …"):
-                url,description,title=chart_metadata(product,step,projection_id)
-                png=download_chart(url)
-            st.session_state["v2_ec46_result"]=(product,index,projection,png,description,title)
-        except (requests.RequestException,RuntimeError,ValueError) as exc:
-            st.error(f"Die ausgewählte ECMWF-Wochenkarte ist nicht verfügbar: {exc}")
-    result=st.session_state.get("v2_ec46_result")
-    if result and result[:3]==(product,index,projection):
-        _,_,_,png,description,title=result
-        st.image(png,caption=f"ECMWF · {title}",use_container_width=True)
-        st.download_button("ECMWF-Karte als PNG herunterladen",png,
-                           file_name=f"ELBTAL_ECMWF_EC46_Woche_{index}.png",
-                           mime="image/png")
-        if description:st.caption("Originalangaben ECMWF: "+description)
-        st.caption("Quelle: ECMWF OpenCharts (CC BY 4.0). Grafik und Farbskala stammen unverändert von ECMWF.")
-    with st.expander("ℹ️ Hinweise zu Langfristprognosen",expanded=False):
-        st.write("Wochenanomalien vergleichen die prognostizierten Wochenmittel mit der ECMWF-Modellklimatologie. Die Prognoseunsicherheit nimmt mit dem Vorhersagezeitraum zu.")
-        st.write("Die öffentlichen ECMWF-Karten sind fertige Originalgrafiken. Eigene ELBTAL-Rohdatenkarten mit frei gestaltbarer Skala benötigen einen geeigneten Zugang zu den zugrunde liegenden Rasterdaten.")
-        st.write("Einzelne Wochen und Regionen können bei ECMWF fehlen. Die tatsächlich gelieferte Periode steht in den Originalangaben unter der Karte.")
+            with st.spinner("ECMWF-WMS-Karte laden …"):
+                png = get_map(selected, choices[chosen], area)
+            st.session_state["v2_ec46_wms_result"] = (selected, choices[chosen], area, png)
+        except (requests.RequestException, RuntimeError, ValueError) as exc:
+            st.error(f"Die ECMWF-Karte konnte nicht geladen werden: {exc}")
+    result = st.session_state.get("v2_ec46_wms_result")
+    if result and result[:3] == (selected, choices[chosen], area):
+        png = result[3]
+        st.image(png, caption=f"ECMWF ecCharts · {layer['title']} · {chosen}", use_container_width=True)
+        st.download_button("ECMWF-Karte als PNG herunterladen", png,
+                           file_name="ELBTAL_ECMWF_Langfrist.png", mime="image/png")
+        st.caption("Quelle: ECMWF ecCharts WMS. Originalkarte, keine berechneten Ersatzwerte.")
+    with st.expander("ℹ️ Hinweise zu Langfristprognosen"):
+        st.write("Wochenanomalien zeigen Abweichungen gegenüber der Modellklimatologie. Die Unsicherheit steigt mit dem Vorhersagezeitraum.")
+        st.write("Der öffentliche WMS-Zugang kann weniger Produkte anbieten als der ECMWF-Kartenbrowser.")
