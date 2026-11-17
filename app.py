@@ -621,7 +621,7 @@ from app_version import VERSION as VERSION
 apply_v2_style()
 # Branding migration: discard only previously rendered PNGs carrying the old brand.
 # Keep user selections and all weather-data caches; maps regenerate on demand.
-if st.session_state.get("_meteoost_brand_revision") != "meteoost-2026-11":
+if st.session_state.get("_meteoost_brand_revision") != "meteoost-2026-11-r2":
     for _map_cache_key in (
         "eu_map", "eu_batch_maps", "eu_batch_maps_queue",
         "global_map", "global_map_batch", "global_map_batch_queue",
@@ -630,7 +630,9 @@ if st.session_state.get("_meteoost_brand_revision") != "meteoost-2026-11":
         "krumet_images", *IMAGE_KEYS.values(),
     ):
         st.session_state.pop(_map_cache_key, None)
-    st.session_state["_meteoost_brand_revision"] = "meteoost-2026-11"
+    st.session_state["_meteoost_brand_revision"] = "meteoost-2026-11-r2"
+    # Old cached PNG bytes can outlive deployments even after code changes.
+    st.cache_data.clear()
 st.markdown(
     f"""<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;
     margin:0 0 0.65rem 0;line-height:1.2;">
@@ -665,6 +667,8 @@ st.markdown(
 # deployments. Reload the navigation module so an updated menu takes effect
 # even when the app process has not restarted.
 import importlib as _meteoost_importlib
+import map_design as _meteoost_map_design
+_meteoost_importlib.reload(_meteoost_map_design)
 import v2_navigation as _meteoost_navigation
 _meteoost_importlib.reload(_meteoost_navigation)
 _meteoost_navigation.show()
