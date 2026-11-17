@@ -8,11 +8,11 @@ from PIL import Image, ImageDraw, ImageFont
 from matplotlib import font_manager
 from significant_weather import CATEGORIES
 
-NAVY = "#061C35"
-PANEL = "#102E4A"
-CYAN = "#35C9F4"
+NAVY = "#071B30"
+PANEL = "#102A43"
+CYAN = "#39C8EE"
 WHITE = "#F2F7FF"
-MUTED = "#B9CCDF"
+MUTED = "#A9C0D4"
 
 
 def style_figure(fig, ax):
@@ -71,12 +71,12 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
     height = 1600 if portrait else 1200
     scale = width / 1100.0
     u = lambda n: max(1, round(n * scale))
-    margin = u(16)
-    top = u(194)
+    margin = u(11)
+    top = u(153)
     is_weather = "Signifikantes Wetter" in str(parameter)
     legend_h = u(145) if is_weather else 0
-    footer_h = u(58)
-    map_bottom = height - footer_h - legend_h - u(6)
+    footer_h = u(43)
+    map_bottom = height - footer_h - legend_h - u(3)
     max_map_w = width - 2 * margin
     max_map_h = map_bottom - top
     if max_map_h <= 0:
@@ -99,45 +99,44 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
     raw.thumbnail((max_map_w,max_map_h),Image.Resampling.LANCZOS)
     canvas = Image.new("RGB", (width, height), NAVY)
     d = ImageDraw.Draw(canvas)
-    d.rounded_rectangle((u(7), u(7), width-u(7), height-u(7)),
-                        radius=u(13), outline="#244966", width=max(1,u(1)))
+    # Premium Dark: clean outer canvas, no competing double border.
     def text(x, y, value, size, color=WHITE, bold=False):
         d.text((u(x),u(y)),str(value),font=_font(u(size),bold),fill=color)
-    def panel(x0,y0,x1,y1,r=10):
-        d.rounded_rectangle((u(x0),u(y0),u(x1),u(y1)),radius=u(r),fill=PANEL,outline="#32617F",width=max(1,u(1)))
+    def panel(x0,y0,x1,y1,r=8):
+        d.rounded_rectangle((u(x0),u(y0),u(x1),u(y1)),radius=u(r),fill=PANEL,outline="#244660",width=max(1,u(1)))
     base_width = width / scale
     # Logo strip, matching the reference design: no oversized empty box.
-    d.rectangle((0,0,width,u(108)),fill="#0A2945")
-    d.rectangle((0,0,u(9),u(108)),fill=CYAN)
-    d.line((0,u(107),width,u(107)),fill="#3E9EC3",width=max(1,u(2)))
+    d.rectangle((0,0,width,u(79)),fill="#0B253D")
+    d.rectangle((0,0,u(5),u(79)),fill=CYAN)
+    d.line((0,u(78),width,u(78)),fill="#244C66",width=max(1,u(1)))
     # Cloud outline with simple vector primitives (no image asset or external request).
-    cx,cy=u(60),u(54)
+    cx,cy=u(46),u(37)
     lw=max(2,u(4))
     for xy in [(cx-u(31),cy-u(12),cx+u(10),cy+u(28)),
                (cx-u(7),cy-u(34),cx+u(43),cy+u(20)),
                (cx+u(21),cy-u(11),cx+u(64),cy+u(31))]:
         d.arc(xy,180,355,fill=CYAN,width=lw)
     d.line((cx-u(28),cy+u(27),cx+u(55),cy+u(27)),fill=CYAN,width=lw)
-    text(160,11,"ELBTAL",43,bold=True)
-    text(163,67,"W E T T E R K A R T E N",13,CYAN,True)
-    d.line((u(395),u(18),u(395),u(89)),fill=CYAN,width=max(1,u(2)))
+    text(125,7,"ELBTAL",32,bold=True)
+    text(128,49,"W E T T E R K A R T E N",9,CYAN,True)
+    d.line((u(335),u(13),u(335),u(65)),fill="#2C8DB3",width=max(1,u(1)))
     title = str(parameter)
     for symbol in ("🌦️ ","🌡️ ","🌬️ ","🌧️ ","💧 ","💦 ","🌫️ "):
         title=title.replace(symbol,"")
-    title_size=32 if len(title)<23 else 25
-    text(430,12,title,title_size,bold=True)
-    text(433,65,f"{model}  ·  {region}",19,MUTED)
+    title_size=26 if len(title)<23 else 20
+    text(360,7,title,title_size,bold=True)
+    text(362,47,f"{model}  ·  {region}",15,MUTED)
     # Three status panels with icons and larger, readable typography.
-    xcoords=[16,415,814]
-    widths=[387,387,base_width-830]
+    xcoords=[11,376,741]
+    widths=[354,354,base_width-752]
     valid_local=valid.astimezone(ZoneInfo("Europe/Berlin"))
     lead=round((valid-run).total_seconds()/3600)
     cells=[("MODELLLAUF",run.strftime("%d.%m.%Y · %H:%M UTC")),
            ("GÜLTIG",valid_local.strftime("%d.%m.%Y · %H:%M %Z")),
            ("PROGNOSE",f"+{lead} h")]
     for i,((label,value),x,cw) in enumerate(zip(cells,xcoords,widths)):
-        panel(x,118,x+cw,185)
-        ix=u(x+18); iy=u(139)
+        panel(x,88,x+cw,145)
+        ix=u(x+14); iy=u(105)
         if i==0:
             d.rounded_rectangle((ix,iy,ix+u(29),iy+u(26)),radius=u(3),outline=CYAN,width=max(1,u(2)))
             d.line((ix,iy+u(8),ix+u(29),iy+u(8)),fill=CYAN,width=max(1,u(2)))
@@ -146,15 +145,11 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
             d.line((ix+u(14),iy+u(5),ix+u(14),iy+u(14),ix+u(21),iy+u(18)),fill=CYAN,width=max(1,u(2)))
         else:
             d.polygon([(ix,iy),(ix+u(26),iy+u(14)),(ix,iy+u(28))],outline=CYAN)
-        text(x+59,124,label,13,MUTED,True)
-        text(x+59,147,value,17 if i!=2 else 22,WHITE,True)
+        text(x+50,93,label,11,MUTED,True)
+        text(x+50,113,value,15 if i!=2 else 19,WHITE,True)
     image_x=(width-raw.width)//2
     image_y=top+(max_map_h-raw.height)//2
-    # Outline outside the bitmap: no map or colorbar pixels are covered.
-    d.rounded_rectangle((max(0,image_x-u(4)),max(0,image_y-u(4)),
-                         min(width-1,image_x+raw.width+u(4)),
-                         min(height-1,image_y+raw.height+u(4))),
-                        radius=u(5),outline="#356887",width=max(1,u(2)))
+    # Let the meteorological plot remain the visual focus; no decorative frame.
     canvas.paste(raw,(image_x,image_y))
     if is_weather:
         # Full-width grouped legend; same exact category colors as the DWD WW raster.
@@ -185,15 +180,15 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
                        "Gewitter leicht/mäßig":"Gewitter\nleicht/mäßig"}
                 name=words.get(label,label)
                 d.multiline_text((u(gx+30),u(yy-2)),name,font=_font(u(11)),fill=WHITE,spacing=u(1))
-    fy=(height-footer_h)/scale+5
-    panel(16,fy,base_width-16,fy+48)
+    fy=(height-footer_h)/scale+3
+    d.line((u(11),u(fy-3),width-u(11),u(fy-3)),fill="#244660",width=max(1,u(1)))
     src=source or ("DWD" if model.startswith("ICON") else "NOAA")
     source_label = "DWD RADOLAN" if model == "DWD RADOLAN" else f"{src} ({model})"
-    text(35,fy+16,f"Daten: {source_label}    |    Region: {region}",14,MUTED)
+    text(19,fy+9,f"Daten: {source_label}    |    Region: {region}",12,MUTED)
     from app_version import VERSION
     brand=f"ELBTAL V{VERSION}"
-    bb=d.textbbox((0,0),brand,font=_font(u(20),True))
-    d.text((width-u(37)-(bb[2]-bb[0]),u(fy+12)),brand,font=_font(u(20),True),fill=WHITE)
+    bb=d.textbbox((0,0),brand,font=_font(u(13),True))
+    d.text((width-u(19)-(bb[2]-bb[0]),u(fy+9)),brand,font=_font(u(13),True),fill=MUTED)
     output=io.BytesIO()
     canvas.save(output,format="PNG")
     return output.getvalue()
