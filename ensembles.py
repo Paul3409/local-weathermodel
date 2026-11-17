@@ -1,4 +1,4 @@
-"""ELBTAL point ensemble meteograms from official GEFS / ECMWF open GRIB data."""
+"""MeteoOst point ensemble meteograms from official GEFS / ECMWF open GRIB data."""
 import io
 import os
 import tempfile
@@ -34,7 +34,7 @@ PLACES={
 }
 FIELDS={"MSLP":"msl","T850":"t850","T2":"t2","T2 + Niederschlag":"t2","Neuschnee":"snow"}
 COLORS=["#1DC6EE","#30B79C","#81C56D","#E2BF61","#E77D5F","#B07DD3"]
-HEADERS={"User-Agent":"ELBTAL-Wetterkarten/1.0"}
+HEADERS={"User-Agent":"MeteoOst-Wetterkarten/1.0"}
 
 from model_cycles import recent_cycles
 
@@ -256,12 +256,12 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
         for spine in ax2.spines.values():spine.set_color("#5CA8D4")
         ax2.set_ylim(bottom=0)
         ax.set_position([.075,.365,.88,.335])
-    # ELBTAL cloud mark in the same cyan line style as the weather map frames.
+    # MeteoOst cloud mark in the same cyan line style as the weather map frames.
     for x,y,w,h,t1,t2 in [(.023,.919,.036,.037,0,180),(.039,.931,.051,.055,0,180),(.075,.918,.037,.039,0,180)]:
         fig.add_artist(Arc((x+w/2,y+h/2),w,h,theta1=t1,theta2=t2,
                            color="#45C8F5",lw=2.4,transform=fig.transFigure))
     fig.add_artist(Line2D([.032,.098],[.92,.92],color="#45C8F5",lw=2.4,transform=fig.transFigure))
-    fig.text(.125,.94,"ELBTAL",color="white",fontsize=24,fontweight="bold")
+    fig.text(.125,.94,"MeteoOst",color="white",fontsize=24,fontweight="bold")
     fig.text(.125,.91,"W E T T E R K A R T E N",color="#45C8F5",fontsize=9)
     fig.add_artist(Line2D([.37,.37],[.906,.977],color="#45C8F5",lw=1.5,transform=fig.transFigure))
     title={"msl":"MSLP","t850":"T850","t2":"T2","snow":"Schneehöhenzuwachs" if model=="GEFS" else "Schneefall-Wasseräquivalent"}[field]
@@ -300,7 +300,7 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
     coverage=np.isfinite(data).mean()*100
     fig.text(.045,.046,f"Daten: {'NOAA' if model=='GEFS' else 'ECMWF'}  |  Ort: {place}  |  Abdeckung: {coverage:.0f} %",
              color="#A9C3D9",fontsize=10)
-    fig.text(.82,.046,f"ELBTAL V{VERSION}",color="white",fontsize=11,fontweight="bold")
+    fig.text(.82,.046,f"MeteoOst V{VERSION}",color="white",fontsize=11,fontweight="bold")
     out=io.BytesIO();fig.savefig(out,format="png",facecolor=fig.get_facecolor())
     plt.close(fig)
     return out.getvalue()
@@ -308,7 +308,7 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
 def show():
     """Instant display of already published diagrams, without model downloads."""
     from ensemble_archive import available_images
-    st.subheader("📊 ELBTAL · Ensemble-Diagramme")
+    st.subheader("📊 MeteoOst · Ensemble-Diagramme")
     model=st.segmented_control("Ensemble",["GEFS","ECMWF ENS"],default="GEFS",key="ens_model")
     place=st.selectbox("Ort",list(PLACES),key="ens_place")
     parameter=st.selectbox("Parameter",list(FIELDS),key="ens_param")
@@ -350,5 +350,5 @@ def show():
     st.image(str(result),use_container_width=True)
     st.download_button("Ensemble als PNG herunterladen",result.read_bytes(),
                        file_name=result.name,mime="image/png",key="ens_archive_download")
-    st.caption("NOAA/ECMWF-Originaldaten · vorab berechnete ELBTAL-Grafik. "
+    st.caption("NOAA/ECMWF-Originaldaten · vorab berechnete MeteoOst-Grafik. "
                "Neue Modellläufe erscheinen automatisch nach der Veröffentlichung durch den GitHub-Workflow.")
