@@ -108,7 +108,6 @@ def ecmwf_step(run,step,field,lat,lon):
                 "stream":"enfo","type":"pf","param":param,"number":list(range(1,51))}
         if field=="t850":kwargs["levelist"]=850
         client.retrieve(**kwargs,target=path)
-        with open(path,"rb") as f:raw=f.read()
         # Each GRIB message represents a different ensemble member.
         results={}
         with open(path,"rb") as f:
@@ -230,7 +229,8 @@ def draw(model,place,run,field,steps,data,precip=None):
         boxstyle="round,pad=0.007,rounding_size=0.009",
         linewidth=1.2,edgecolor="#287CA6",facecolor="#0C2946",
         transform=fig.transFigure))
-    fig.text(.045,.046,f"Daten: {'NOAA' if model=='GEFS' else 'ECMWF'}  |  Ort: {place}",
+    coverage=np.isfinite(data).mean()*100
+    fig.text(.045,.046,f"Daten: {'NOAA' if model=='GEFS' else 'ECMWF'}  |  Ort: {place}  |  Abdeckung: {coverage:.0f} %",
              color="#A9C3D9",fontsize=10)
     fig.text(.82,.046,f"ELBTAL V{VERSION}",color="white",fontsize=11,fontweight="bold")
     out=io.BytesIO();fig.savefig(out,format="png",facecolor=fig.get_facecolor())
