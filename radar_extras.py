@@ -280,13 +280,13 @@ def show():
     st.subheader("📡 ELBTAL | Regenradar Deutschland")
     mode = st.selectbox(
         "Radarparameter",
-        ["Reflektivität (dBZ)", "Regenrate (mm/h)", "Live-Wetteranalyse", "Niederschlagssummen", "Hagelrisiko"],
+        ["Reflektivität (dBZ)", "Regenrate (mm/h)", "Live-Wetteranalyse", "Niederschlagssummen", "Hagelrisiko", "Hagelrisiko HD"],
         key="radar_mode_new",
     )
     product = {
         "Reflektivität (dBZ)": "WN", "Regenrate (mm/h)": "RY",
         "Live-Wetteranalyse": "HYMEC", "Niederschlagssummen": "RW",
-        "Hagelrisiko": "KONRAD3D",
+        "Hagelrisiko": "KONRAD3D", "Hagelrisiko HD": "HAIL_HD",
     }[mode]
     hours = (st.selectbox("Zeitraum", [1, 3, 6, 12, 24],
                           format_func=lambda n: f"{n} Stunden", key="radar_rw_hours")
@@ -299,6 +299,8 @@ def show():
         if product == "KONRAD3D":
             import radar_hail
             frames = radar_hail.list_frames()
+        elif product == "HAIL_HD":
+            frames = radar.list_frames("WN")
         else:
             frames = (list_extra_frames(product) if product in ("HYMEC", "RW")
                       else radar.list_frames(product))
@@ -328,6 +330,15 @@ def show():
                     import radar_hail
                     cells = radar_hail.load_cells(url)
                     png = radar_hail.render(cells, stamp, cities=cities)
+                elif product == "HAIL_HD":
+                    import radar_hail_hd
+                    field, geo = radar.load_frame(url, "WN")
+                    try:
+                        cells = radar_hail_hd.matching_cells(stamp)
+                    except (requests.RequestException, ValueError, RuntimeError) as exc:
+                        cells = []
+                        st.info(f"KONRAD3D-Zellüberlagerung nicht verfügbar ({type(exc).__name__}).")
+                    png = radar_hail_hd.render(field, geo, stamp, cells=cells, cities=cities)
                 elif product == "RW":
                     field, geo = accumulated_rw(hours, stamp)
                 elif product == "HYMEC":
@@ -347,7 +358,7 @@ def show():
                     except (requests.RequestException, OSError, ValueError, RuntimeError) as exc:
                         st.info("WN-Reflektivität nicht verfügbar; originale HYMEC-Klassen "
                                 f"werden angezeigt ({type(exc).__name__}).")
-                if product != "KONRAD3D":
+                if product not in ("KONRAD3D", "HAIL_HD"):
                     png = render_extra(field, geo, product, stamp, cities=cities, hours=hours,
                                        reflectivity=reflectivity,
                                        reflectivity_geometry=reflectivity_geometry)
@@ -364,6 +375,12 @@ def show():
     if product == "RW":
         st.caption("RW: 60-Minuten-Mengen (mm) in genau einstündigem Abstand. "
                    "Unvollständige Reihen werden nicht als gültige Summe angezeigt.")
+    elif product == "HAIL_HD":
+        st.caption("ELBTAL Hagelrisiko HD: flächiger Radarindikator aus DWD-WN-Reflektivität "
+                   "(10 Farbstufen). Starke Echos können auch durch Regen entstehen. "
+                   "Weiß/magenta umrandete Zellen sind zusätzliche KONRAD3D-Hagelsignale. "
+                   "Keine validierte Hagelwahrscheinlichkeit oder Hagelgrößenprognose; "
+                   "jeweils eine aktuelle Radaraufnahme, keine Stundensumme.")
     elif product == "KONRAD3D":
         st.caption("DWD KONRAD3D: 5-Minuten-Gewitterzellen mit Hagel-Warnflag. "
                    "Fünf Legendenklassen: kein Signal, Hagelsignal und Großhagelsignal, "
