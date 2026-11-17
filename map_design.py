@@ -9,10 +9,10 @@ from matplotlib import font_manager
 from significant_weather import CATEGORIES
 
 NAVY = "#061C35"
-PANEL = "#092844"
+PANEL = "#102E4A"
 CYAN = "#35C9F4"
 WHITE = "#F2F7FF"
-MUTED = "#B5C8DC"
+MUTED = "#B9CCDF"
 
 
 def style_figure(fig, ax):
@@ -99,14 +99,17 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
     raw.thumbnail((max_map_w,max_map_h),Image.Resampling.LANCZOS)
     canvas = Image.new("RGB", (width, height), NAVY)
     d = ImageDraw.Draw(canvas)
+    d.rounded_rectangle((u(7), u(7), width-u(7), height-u(7)),
+                        radius=u(13), outline="#244966", width=max(1,u(1)))
     def text(x, y, value, size, color=WHITE, bold=False):
         d.text((u(x),u(y)),str(value),font=_font(u(size),bold),fill=color)
     def panel(x0,y0,x1,y1,r=10):
-        d.rounded_rectangle((u(x0),u(y0),u(x1),u(y1)),radius=u(r),fill=PANEL,outline="#277CA6",width=max(1,u(2)))
+        d.rounded_rectangle((u(x0),u(y0),u(x1),u(y1)),radius=u(r),fill=PANEL,outline="#32617F",width=max(1,u(1)))
     base_width = width / scale
     # Logo strip, matching the reference design: no oversized empty box.
-    d.rectangle((0,0,width,u(108)),fill="#08223E")
-    d.line((0,u(107),width,u(107)),fill="#25739A",width=max(1,u(2)))
+    d.rectangle((0,0,width,u(108)),fill="#0A2945")
+    d.rectangle((0,0,u(9),u(108)),fill=CYAN)
+    d.line((0,u(107),width,u(107)),fill="#3E9EC3",width=max(1,u(2)))
     # Cloud outline with simple vector primitives (no image asset or external request).
     cx,cy=u(60),u(54)
     lw=max(2,u(4))
@@ -145,7 +148,14 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
             d.polygon([(ix,iy),(ix+u(26),iy+u(14)),(ix,iy+u(28))],outline=CYAN)
         text(x+59,124,label,13,MUTED,True)
         text(x+59,147,value,17 if i!=2 else 22,WHITE,True)
-    canvas.paste(raw,((width-raw.width)//2,top+(max_map_h-raw.height)//2))
+    image_x=(width-raw.width)//2
+    image_y=top+(max_map_h-raw.height)//2
+    # Outline outside the bitmap: no map or colorbar pixels are covered.
+    d.rounded_rectangle((max(0,image_x-u(4)),max(0,image_y-u(4)),
+                         min(width-1,image_x+raw.width+u(4)),
+                         min(height-1,image_y+raw.height+u(4))),
+                        radius=u(5),outline="#356887",width=max(1,u(2)))
+    canvas.paste(raw,(image_x,image_y))
     if is_weather:
         # Full-width grouped legend; same exact category colors as the DWD WW raster.
         ly=(height-footer_h-legend_h)/scale
