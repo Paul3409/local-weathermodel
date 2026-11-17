@@ -4,8 +4,6 @@ Only layers actually advertised by ECMWF's public GetCapabilities document
 are selectable. No invented forecast data or unverified layer identifiers.
 """
 from datetime import datetime, timezone
-from io import BytesIO
-from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 
 import requests
@@ -132,17 +130,22 @@ def get_map(layer_name, valid_time, area):
 def show():
     from v2_navigation import dropdown
     st.subheader("🗓️ ECMWF-Langfristkarten")
-    st.caption("Offizielle ECMWF-ecCharts-Karten über den öffentlichen WMS-Dienst. Nur tatsächlich freigegebene Karten werden angeboten.")
+    st.caption("ECMWF-Langfrist · Prüfung der öffentlich verfügbaren ecCharts-WMS-Karten. Eigene ELBTAL-Rasterkarten benötigen einen separaten Datenzugang.")
     parameter = dropdown("1. Parameter", "v2_ec46_parameter", list(PARAMETERS))
     try:
         with st.spinner("ECMWF-WMS-Kartenebenen abrufen …"):
-            layers = matching_layers(parameter, capabilities())
+            available_layers = capabilities()
+            layers = matching_layers(parameter, available_layers)
     except (requests.RequestException, RuntimeError) as exc:
         st.warning(f"Der öffentliche ECMWF-WMS-Dienst ist derzeit nicht erreichbar: {exc}")
         st.link_button("ECMWF-Kartenbrowser öffnen", "https://charts.ecmwf.int/")
         return
     if not layers:
-        st.info("ECMWF stellt für diesen Parameter derzeit keine eindeutig als Wochenanomalie erkennbare Ebene im öffentlichen WMS bereit. Eine Zugangsbeschränkung ist möglich.")
+        st.info("Im öffentlichen ECMWF-WMS wurde keine passende Wochenanomalie-Ebene gefunden. Das bedeutet nicht, dass ECMWF keine Langfristprognosen berechnet.")
+        with st.expander("🔎 ECMWF-Datenzugriff prüfen", expanded=False):
+            st.write(f"Öffentlich gemeldete WMS-Ebenen: {len(available_layers)}")
+            st.write("Davon eindeutig passende Wochenanomalie-Ebenen: 0")
+            st.caption("WMS liefert fertige Kartenbilder, keine Rasterwerte für eigene ELBTAL-Karten. Für eigene Karten bis Tag 46 wird ein geeigneter ECMWF-Rasterdatenzugang einschließlich Modellklimatologie benötigt.")
         st.link_button("Offizielle ECMWF-Langfristkarten öffnen", "https://charts.ecmwf.int/")
         return
     names = [layer["name"] for layer in layers]
