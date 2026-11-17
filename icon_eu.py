@@ -692,7 +692,8 @@ def show(region, forced_model=None, forced_parameter=None):
         key="eu_lead_"+model,
     )
     st.caption("Vier UTC-Zyklen nach modellabhängiger Bereitstellungsfrist; tatsächliche Verfügbarkeit wird beim Abruf geprüft.")
-    if st.button(f"{model}-Karte manuell berechnen",type="primary"):
+    # Reuse the same original DWD processing for a single map and a batch.
+    def _calculate_map(lead):
         with st.status(f"{model}-Datei und Grenzen laden …",expanded=True) as status:
             try:
                 runs=[run_choice] if run_choice is not None else [r for r in candidates(model) if probe(model,r) is True] or candidates(model)
@@ -781,11 +782,49 @@ def show(region, forced_model=None, forced_parameter=None):
                         _,_,mslp=load_gfs(pressure_urls[lead],valid,REGIONS[region],"MSLP")
                 png=render(X,Y,Z,region,parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["eu_map"]=(MAP_STYLE_VERSION,model,region,parameter,lead,valid,png)
+                st.session_state.setdefault("eu_batch_maps",{})[(MAP_STYLE_VERSION,model,region,parameter,run,lead)]=(valid,png)
                 st.caption(f"Verwendeter Modelllauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
                 status.update(label=f"{model}-Karte erstellt",state="complete")
             except Exception as exc:
                 status.update(label=f"{model}-Verarbeitung fehlgeschlagen",state="error")
                 st.error(f"{type(exc).__name__}: {exc}")
+
+    if model in ("ICON-D2","ICON-EU"):
+        st.markdown("**⚡ Prognosezeitraum vorladen**")
+        available_hours=list(range(49)) if model=="ICON-D2" else EU_LEADS
+        first,last=st.select_slider(
+            "Zeitraum auswählen",options=available_hours,
+            value=(0,6),key="eu_batch_range_"+model,
+            format_func=lambda h:f"+{h} h · {(preview_run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m. %H:%M}",
+        )
+        interval=st.selectbox("Abstand zwischen den Karten", [1,2,3,6,12],
+                              index=0 if model=="ICON-D2" else 2,key="eu_batch_interval_"+model)
+        hours=[h for h in available_hours if first<=h<=last and (h-first)%interval==0]
+        st.caption(f"{len(hours)} Karten für {parameter} · {model} · {region}. Fertige Karten erscheinen sofort.")
+        if st.button(f"⚡ {len(hours)} Karten vorladen",key="eu_batch_start_"+model):
+            progress=st.progress(0,text="Karten werden vorbereitet …")
+            gallery=st.container()
+            completed=0
+            for index,hour in enumerate(hours):
+                _calculate_map(hour)
+                cached=st.session_state.get("eu_batch_maps",{})
+                found=[(k,v) for k,v in cached.items() if k[:4]==(MAP_STYLE_VERSION,model,region,parameter) and k[5]==hour]
+                if found:
+                    valid,png=found[-1][1]
+                    with gallery:
+                        st.caption(f"+{hour} h · {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
+                        st.image(png,width="stretch")
+                    completed+=1
+                progress.progress((index+1)/len(hours),text=f"{index+1}/{len(hours)} verarbeitet · {completed} fertig")
+            st.success(f"{completed}/{len(hours)} Karten fertig. Über die Vorhersagestunde oben einzeln auswählen.")
+    if st.button(f"{model}-Karte manuell berechnen",type="primary"):
+        _calculate_map(lead)
+    # A batch result remains available when moving the hour slider.
+    if model in ("ICON-D2","ICON-EU"):
+        for (version,m,r,p,run,h),(valid,png) in reversed(list(st.session_state.get("eu_batch_maps",{}).items())):
+            if (version,m,r,p,h)==(MAP_STYLE_VERSION,model,region,parameter,lead):
+                st.session_state["eu_map"]=(version,m,r,p,h,valid,png)
+                break
     result=st.session_state.get("eu_map")
     if result and (len(result)!=7 or result[0]!=MAP_STYLE_VERSION):
         st.session_state.pop("eu_map",None)
