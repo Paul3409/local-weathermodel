@@ -135,16 +135,16 @@ def render_diagnostic(X,Y,Z,region,parameter,run,valid):
 def recent_runs():
     cutoff=datetime.now(timezone.utc)-timedelta(minutes=55)
     latest=cutoff.replace(minute=0,second=0,microsecond=0)
-    return [latest-timedelta(hours=i) for i in range(8)]
+    return [latest-timedelta(hours=i) for i in range(49)]
 
-def show(region):
+def show(region,forced_parameter=None):
     st.subheader(f"ICON-D2-RUC · {region}")
     st.caption("DWD Open Data v1 · stündliche Modellläufe · bis +27 h · native ICON-Gitterdaten. Kein Open-Meteo.")
     runs=recent_runs()
     run=st.selectbox("Modelllauf (UTC)",runs,format_func=lambda d:f"{d:%d.%m.%Y %H} UTC",key="ruc_run")
     lead=st.select_slider("Vorhersagestunde",options=list(range(28)),value=6,
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",key="ruc_lead")
-    parameter=st.radio("Parameter",list(PARAMS)+["MSLP-Anomalie"],horizontal=True,key="ruc_param")
+    parameter=forced_parameter if forced_parameter in (list(PARAMS)+["MSLP-Anomalie"]) else st.radio("Parameter",list(PARAMS)+["MSLP-Anomalie"],horizontal=True,key="ruc_param")
     if parameter=="Niederschlagsrate":
         st.caption("Mittlere Niederschlagsrate aus zwei aufeinanderfolgenden Stundenakkumulationen (mm/h).")
     if st.button("RUC-Karte berechnen",type="primary",key="ruc_generate"):
