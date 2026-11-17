@@ -148,7 +148,7 @@ def show(region,forced_parameter=None):
     parameter=forced_parameter if forced_parameter in (list(PARAMS)+["MSLP-Anomalie"]) else st.radio("Parameter",list(PARAMS)+["MSLP-Anomalie"],horizontal=True,key="ruc_param")
     if parameter=="Niederschlagsrate":
         st.caption("Mittlere Niederschlagsrate aus zwei aufeinanderfolgenden Stundenakkumulationen (mm/h).")
-    if st.button("RUC-Karte berechnen",type="primary",key="ruc_generate"):
+    def _calculate_one(lead):
         try:
             with st.spinner("DWD-RUC-Originaldaten laden …"):
                 target="MSLP" if parameter=="MSLP-Anomalie" else parameter
@@ -167,8 +167,39 @@ def show(region,forced_parameter=None):
                     name={"T2":"2-m-Temperatur","CAPE":"CAPE","Simulierte Radarreflektivität":"Simulierte Radarreflektivität"}.get(parameter,parameter)
                     png=(render_diagnostic(X,Y,Z,region,parameter,run,valid) if parameter in ("CAPE","Simulierte Radarreflektivität") else render(X,Y,Z,region,name,run,valid,model="ICON-D2-RUC",mslp=pressure))
                 st.session_state["ruc_map"]=(region,run,lead,parameter,valid,png)
+                st.session_state.setdefault("ruc_map_batch",{})[(region,run,lead,parameter)]=png
         except Exception as exc:
             st.error(f"DWD-RUC-Abruf fehlgeschlagen: {type(exc).__name__}: {exc}")
+    st.markdown("**⚡ Prognosezeitraum vorladen**")
+    _opts=list(range(28))
+    _first,_last=st.select_slider("Zeitraum auswählen",options=_opts,value=(_opts[0],_opts[min(3,len(_opts)-1)]),key="ruc_map_range",format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m. %H:%M}")
+    _interval=st.selectbox("Kartenabstand (Stunden)",[1,2,3,6,12],index=2,key="ruc_map_interval")
+    _hours=[h for h in _opts if _first<=h<=_last and (h-_first)%_interval==0]
+    st.caption(f"{len(_hours)} Karten · fertige Karten erscheinen sofort.")
+    if st.button(f"⚡ {len(_hours)} Karten vorladen",key="ruc_map_start"):
+        _progress=st.progress(0)
+        _gallery=st.container()
+        _ok=0
+        for _i,_hour in enumerate(_hours):
+            _batch_key=(region,run,_hour,parameter)
+            _cached=st.session_state.get("ruc_map_batch",{})
+            if _batch_key not in _cached:
+                _calculate_one(_hour)
+                _cached=st.session_state.get("ruc_map_batch",{})
+            if _batch_key in _cached:
+                with _gallery:
+                    st.caption(f"+{_hour} h · {(run+timedelta(hours=_hour)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
+                    st.image(_cached[_batch_key],width="stretch")
+                _ok+=1
+            _progress.progress((_i+1)/len(_hours),text=f"{_i+1}/{len(_hours)} verarbeitet · {_ok} fertig")
+        st.success(f"{_ok}/{len(_hours)} Karten verfügbar.")
+    if st.button("RUC-Karte berechnen",type="primary",key="ruc_generate"):
+        _calculate_one(lead)
+    _cached_png=st.session_state.get("ruc_map_batch",{}).get((region,run,lead,parameter))
+    if _cached_png is not None:
+        _current=st.session_state.get("ruc_map")
+        if not _current or _current[:4]!=(region,run,lead,parameter):
+            st.session_state["ruc_map"]=(region,run,lead,parameter,run+timedelta(hours=lead),_cached_png)
     result=st.session_state.get("ruc_map")
     if result and result[:4]==(region,run,lead,parameter):
         st.image(result[5],use_container_width=True)
