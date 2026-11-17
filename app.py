@@ -619,6 +619,11 @@ from v2_style import apply as apply_v2_style
 apply_v2_style()
 st.title(f'🌦️ ELBTAL · Wetterkarten (v{VERSION})')
 st.caption(f'WETTERKARTEN  /  VERSION {VERSION}  /  V2-DESIGNVORSCHAU')
+# Accessible from the APK/WebView even when pull-to-refresh is unavailable.
+# Streamlit reruns the app; this is not a forced browser/WebView hard reload.
+if st.button("🔄 Ansicht aktualisieren", key="elbtal_manual_refresh", help="Aktuelle Modellläufe und Daten neu prüfen"):
+    st.cache_data.clear()
+    st.rerun()
 from v2_navigation import show as show_v2_navigation
 if show_v2_navigation():
     st.stop()
