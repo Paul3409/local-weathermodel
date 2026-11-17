@@ -145,6 +145,28 @@ def show():
         with st.expander("🔎 ECMWF-Datenzugriff prüfen", expanded=False):
             st.write(f"Öffentlich gemeldete WMS-Ebenen: {len(available_layers)}")
             st.write("Davon eindeutig passende Wochenanomalie-Ebenen: 0")
+            st.caption("Zur Prüfung werden die von ECMWF gelieferten Originalnamen angezeigt; diese sind keine zusätzlichen ELBTAL-Karten.")
+            terms = ("anomal", "week", "extended", "month", "46", "subseason", "precip", "temperature", "mslp")
+            candidates = [
+                layer for layer in available_layers
+                if any(term in " ".join(str(layer.get(key, "")) for key in ("name", "title", "abstract")).lower()
+                       for term in terms)
+            ]
+            st.write(f"Potentiell relevante Ebenen: {len(candidates)}")
+            if candidates:
+                st.dataframe(
+                    [{"Name": item["name"], "Titel": item["title"], "Beschreibung": item["abstract"][:180]}
+                     for item in candidates],
+                    hide_index=True, use_container_width=True,
+                )
+            st.download_button(
+                "ECMWF-Ebenenliste herunterladen (CSV)",
+                "Name;Titel;Beschreibung\\n" + "\\n".join(
+                    ";".join(str(layer.get(key, "")).replace(";", ",").replace("\\n", " ") for key in ("name", "title", "abstract"))
+                    for layer in available_layers
+                ),
+                file_name="ELBTAL_ECMWF_WMS_Ebenen.csv", mime="text/csv",
+            )
             st.caption("WMS liefert fertige Kartenbilder, keine Rasterwerte für eigene ELBTAL-Karten. Für eigene Karten bis Tag 46 wird ein geeigneter ECMWF-Rasterdatenzugang einschließlich Modellklimatologie benötigt.")
         st.link_button("Offizielle ECMWF-Langfristkarten öffnen", "https://charts.ecmwf.int/")
         return
