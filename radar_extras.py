@@ -38,17 +38,21 @@ CITIES = (
     ("Duisburg", 6.763, 51.434), ("Mühlberg/E.", 13.222, 51.434),
 )
 # Display categories 0..13; HYMEC's original 0..10 remain the source classes.
+# Legend order from bottom to top. Data classes are remapped only for display.
+HYMEC_DISPLAY_CLASSES = (0, 1, 2, 3, 11, 4, 5, 6, 7, 12, 13, 8, 10)
 HYMEC_COLORS = (
-    "#10273e", "#777777", "#69E65B", "#169C32", "#FF8888",
-    "#EF202E", "#F8A04B", "#85E8FF", "#C63CCF", "#C63CCF",
-    "#74108F", "#075B25", "#258EEB", "#1646A8",
+    "#10273e", "#777777", "#69E65B", "#169C32", "#075B25",
+    "#FF8888", "#EF202E", "#F8A04B", "#85E8FF", "#258EEB",
+    "#1646A8", "#C63CCF", "#74108F",
 )
 HYMEC_NAMES = (
     "Kein Niederschlag", "Nicht klassifiziert", "Regen (leicht)",
-    "Regen (mäßig)", "Gefr. Sprühregen", "Gefrierender Regen", "Schneeregen",
-    "Schnee (leicht)", "Graupel", "Hagel", "Großer Hagel",
-    "Regen (stark)", "Schnee (mittel)", "Schnee (stark)",
+    "Regen (mäßig)", "Regen (stark)", "Gefr. Sprühregen",
+    "Gefrierender Regen", "Schneeregen", "Schnee (leicht)",
+    "Schnee (mittel)", "Schnee (stark)", "Graupel/Hagel",
+    "Großer Hagel",
 )
+
 # Empirical radar-reflectivity thresholds, not directly measured intensity.
 # They are intentionally conservative; radar beam altitude and bright band
 # can cause substantial departures from surface precipitation intensity.
@@ -200,9 +204,23 @@ def render_extra(data, geometry, product, stamp, cities=False, hours=None,
         if reflectivity is not None and reflectivity_geometry is not None:
             dbz_grid = _sample_to_map(reflectivity, reflectivity_geometry)
             grid = classify_precipitation(grid, dbz_grid)
-        levels = np.arange(-.5, 14.5, 1)
+        # Reorder legend independently of DWD's fixed HYMEC class codes.
+        # Graupel (8) and Hagel (9) share one display category.
+        remap = np.full(14, np.nan)
+        for display_index, source_index in enumerate(HYMEC_DISPLAY_CLASSES):
+            remap[source_index] = display_index
+        remap[9] = remap[8]
+        mapped = np.full(grid.shape, np.nan)
+        finite = np.isfinite(grid)
+        source = grid[finite].astype(int)
+        good = (source >= 0) & (source < len(remap))
+        mapped_values = np.full(source.shape, np.nan)
+        mapped_values[good] = remap[source[good]]
+        mapped[finite] = mapped_values
+        grid = mapped
+        levels = np.arange(-.5, 13.5, 1)
         colors = HYMEC_COLORS
-        ticks = np.arange(14)
+        ticks = np.arange(13)
         legend_title = "Niederschlagsart"
         title = "Live-Wetteranalyse"
     elif product == "RW":
