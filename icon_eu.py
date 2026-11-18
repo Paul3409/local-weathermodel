@@ -24,7 +24,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Mitteleuropa": (2.0, 27.0, 44.0, 58.0), "Europa & Nordatlantik": (-65.0, 65.0, 32.0, 72.0)}
 HEADERS = {"User-Agent": "MeteoOst weather visualization (educational)"}
-MAP_STYLE_VERSION = "meteoost-v2-0-0"
+MAP_STYLE_VERSION = "meteoost-v2-1-1"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -729,6 +729,8 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             cb.ax.tick_params(axis="y",labelsize=10,labelrotation=0,pad=5)
             # Keep tick numbers horizontal for easy reading, from top to bottom.
             cb.set_label(label,rotation=270,labelpad=22)
+    from value_grid import draw as draw_value_grid
+    draw_value_grid(ax,X,Y,Z,region,parameter)
     output=io.BytesIO()
     fig.savefig(output,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
     plt.close(fig)
