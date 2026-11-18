@@ -391,13 +391,18 @@ def load_gfs(url,valid,bounds,parameter):
 
 @st.cache_data(ttl=900,show_spinner=False)
 def gfs_accumulated_precipitation(run,lead,bounds):
-    """Add NOAA APCP intervals only if GRIB step ranges form a continuous chain."""
-    urls=discover_gfs(run,"Akkumulierter Niederschlag",bounds)
+    """Reconstruct GFS run-total APCP from GRIB accumulation windows.
+
+    GFS may publish overlapping 0-3, 0-6, 0-9 ... intervals.
+    Such fields are cumulative and must replace, not be added to, totals.
+    Other windows are anchored to the total at their startStep.
+    """
     if lead==0:
         x,y,z=load_gfs(discover_gfs(run,"MSLP",bounds)[0],run,bounds,"MSLP")
         return x,y,np.zeros_like(z)
-    X=Y=total=None
-    covered=0
+    urls=discover_gfs(run,"Akkumulierter Niederschlag",bounds)
+    totals={}
+    X=Y=None
     for hour in range(3,lead+1,3):
         url=urls[hour]
         response=requests.get(url,headers=HEADERS,timeout=100)
@@ -405,25 +410,34 @@ def gfs_accumulated_precipitation(run,lead,bounds):
         if not response.content.startswith(b"GRIB"):
             raise RuntimeError(f"GFS APCP +{hour} h nicht verfügbar.")
         with tempfile.NamedTemporaryFile(suffix=".grib2",delete=False) as f:
-            f.write(response.content);path=f.name
+            f.write(response.content)
+            path=f.name
         try:
             with open(path,"rb") as stream:
                 gid=codes_grib_new_from_file(stream)
-                if gid is None:raise RuntimeError("Leere APCP-Datei.")
+                if gid is None:
+                    raise RuntimeError(f"Leere APCP-Datei bei +{hour} h.")
                 try:
                     start=int(codes_get(gid,"startStep"))
                     end=int(codes_get(gid,"endStep"))
-                finally:codes_release(gid)
-        finally:os.unlink(path)
-        if end!=hour or start!=covered:
-            raise RuntimeError(f"APCP-Intervall +{start} bis +{end} h passt nicht an +{covered} h; keine fehlerhafte Summe ausgegeben.")
+                finally:
+                    codes_release(gid)
+        finally:
+            os.unlink(path)
+        if end!=hour or start<0 or start>=end:
+            raise RuntimeError(f"Ungültiges GFS-APCP-Intervall +{start} bis +{end} h.")
+        if start!=0 and start not in totals:
+            raise RuntimeError(f"GFS-APCP-Intervall beginnt bei +{start} h ohne vorhandene Ausgangssumme.")
         x,y,amount=load_gfs(url,run+timedelta(hours=hour),bounds,"Akkumulierter Niederschlag")
-        if total is None:X,Y=x,y;total=np.zeros_like(amount)
-        if amount.shape!=total.shape or not np.isfinite(amount).all():
-            raise RuntimeError("APCP-Gitter unvollständig.")
-        total+=np.maximum(amount,0)
-        covered=hour
-    return X,Y,total
+        if X is None:
+            X,Y=x,y
+        if amount.shape!=X.shape or not np.isfinite(amount).all() or np.nanmin(amount)<-0.01:
+            raise RuntimeError(f"Ungültiges GFS-APCP-Gitter bei +{hour} h.")
+        # 0-hour-based windows already contain the complete accumulated amount.
+        # Other intervals add only to the cumulative field at their start hour.
+        baseline=np.zeros_like(amount) if start==0 else totals[start]
+        totals[hour]=baseline+np.maximum(amount,0)
+    return X,Y,totals[lead]
 
 def windchill_celsius(temp_c, u_ms, v_ms):
     """North-American/Canadian wind chill, using 10-m model wind as a proxy.
@@ -772,7 +786,10 @@ def show(region, forced_model=None, forced_parameter=None):
                                         wind_urls=discover_gfs(run,component,REGIONS[region])
                                         load_gfs(wind_urls[lead],run+timedelta(hours=lead),REGIONS[region],component)
                                 # Check the actual GRIB; a URL may precede publication.
-                                load_gfs(available[lead],run+timedelta(hours=lead),REGIONS[region],parameter)
+                                if parameter=="Akkumulierter Niederschlag" and lead==0:
+                                    load_gfs(discover_gfs(run,"MSLP",REGIONS[region])[0],run,REGIONS[region],"MSLP")
+                                else:
+                                    load_gfs(available[lead],run+timedelta(hours=lead),REGIONS[region],parameter)
                             except (requests.RequestException,RuntimeError,ValueError,OSError) as exc:
                                 st.write(f"GFS-Lauf {run:%d.%m. %H} UTC nicht verfügbar: {type(exc).__name__}")
                                 continue
