@@ -615,7 +615,7 @@ def render_fog(X,Y,Z,run,valid):
     return frame_png(out.getvalue(), 'Nebelpotenzial', 'ICON-D2', 'MeteoOst', run, valid)
 
 
-st.set_page_config(page_title='MeteoOST V2 | v2.1.1', page_icon='🌦️', layout='wide')
+st.set_page_config(page_title='MeteoOST V2 | v2.2.0', page_icon='🌦️', layout='wide')
 from v2_style import apply as apply_v2_style
 from app_version import VERSION as VERSION
 apply_v2_style()
