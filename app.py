@@ -615,13 +615,13 @@ def render_fog(X,Y,Z,run,valid):
     return frame_png(out.getvalue(), 'Nebelpotenzial', 'ICON-D2', 'MeteoOst', run, valid)
 
 
-st.set_page_config(page_title='MeteoOst Wetterkarten', page_icon='🌦️', layout='wide')
+st.set_page_config(page_title='MeteoOST V2 | v2.0.0', page_icon='🌦️', layout='wide')
 from v2_style import apply as apply_v2_style
 from app_version import VERSION as VERSION
 apply_v2_style()
 # Branding migration: discard only previously rendered PNGs carrying the old brand.
 # Keep user selections and all weather-data caches; maps regenerate on demand.
-if st.session_state.get("_meteoost_brand_revision") != "meteoost-2026-11-r2":
+if st.session_state.get("_meteoost_brand_revision") != "meteoost-v2-0-0-brand":
     for _map_cache_key in (
         "eu_map", "eu_batch_maps", "eu_batch_maps_queue",
         "global_map", "global_map_batch", "global_map_batch_queue",
@@ -637,9 +637,9 @@ st.markdown(
     f"""<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;
     margin:0 0 0.65rem 0;line-height:1.2;">
     <span style="font-size:clamp(1.12rem,4.6vw,1.65rem);font-weight:800;
-    color:#f3f8ff;white-space:nowrap;">🌦️ MeteoOst · Wetterkarten</span>
+    color:#f3f8ff;white-space:nowrap;">🌦️ MeteoOST V2 | v{VERSION}</span>
     <span style="font-size:0.82rem;font-weight:700;color:#9cddf1;
-    white-space:nowrap;">(v{VERSION})</span></div>""",
+    white-space:nowrap;">Wetterkarten</span></div>""",
     unsafe_allow_html=True,
 )
 # Native refresh is reliable in Android WebView even when links are intercepted.
