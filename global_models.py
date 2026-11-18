@@ -105,7 +105,16 @@ def get_field(model,run,lead,parameter,bounds):
         # Combine with forecast snow density (kg/m³) for physical depth in cm.
         X,Y,swe=decode(ecmwf_bytes(run,lead,"sd"),run+timedelta(hours=lead),bounds,"sd")
         _,_,density=decode(ecmwf_bytes(run,lead,"rsn"),run+timedelta(hours=lead),bounds,"rsn")
-        snow_cm=np.where((swe>0)&(density>0),100000*np.maximum(swe,0)/np.maximum(density,1),0)
+        # sd is metres water equivalent, rsn is kg/m³. Do not silently
+        # turn missing/invalid density into a false snow-free (0 cm) pixel.
+        valid_swe=np.isfinite(swe)&(swe>=-1e-8)
+        valid_density=np.isfinite(density)&(density>0)&(density<=1000)
+        snow_cm=np.full(swe.shape,np.nan,dtype=float)
+        snow_cm[valid_swe&(swe<=0)]=0.0
+        snowy=valid_swe&(swe>0)&valid_density
+        snow_cm[snowy]=100000*swe[snowy]/density[snowy]
+        if not np.isfinite(snow_cm).any():
+            raise RuntimeError("ECMWF-Schneedichte fehlt oder ist ungültig; keine verlässliche Schneehöhe.")
         return X,Y,snow_cm
     raw=ecmwf_bytes(run,lead,parameter) if model=="ECMWF IFS" else gefs_bytes(run,lead,parameter,bounds)
     return decode(raw,run+timedelta(hours=lead),bounds,parameter)
