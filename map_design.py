@@ -74,10 +74,12 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
     margin = u(11)
     top = u(153)
     is_weather = "Signifikantes Wetter" in str(parameter)
-    legend_h = u(145) if is_weather else 0
+    # WW uses a right-hand legend instead of consuming map height.
+    legend_h = 0
+    sidebar_w = u(252) if is_weather else 0
     footer_h = u(43)
     map_bottom = height - footer_h - legend_h - u(3)
-    max_map_w = width - 2 * margin
+    max_map_w = width - 2 * margin - sidebar_w - (u(7) if is_weather else 0)
     max_map_h = map_bottom - top
     if max_map_h <= 0:
         raise RuntimeError("Ungültiges 4:3-Kartenlayout.")
@@ -147,14 +149,16 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
             d.polygon([(ix,iy),(ix+u(26),iy+u(14)),(ix,iy+u(28))],outline=CYAN)
         text(x+50,93,label,11,MUTED,True)
         text(x+50,113,value,15 if i!=2 else 19,WHITE,True)
-    image_x=(width-raw.width)//2
+    image_x=(width-sidebar_w-u(7)-raw.width)//2 if is_weather else (width-raw.width)//2
     image_y=top+(max_map_h-raw.height)//2
     # Let the meteorological plot remain the visual focus; no decorative frame.
     canvas.paste(raw,(image_x,image_y))
     if is_weather:
-        # Full-width grouped legend; same exact category colors as the DWD WW raster.
-        ly=(height-footer_h-legend_h)/scale
-        panel(16,ly,base_width-16,ly+140)
+        # Vertical legend frees the former bottom-legend height for the map.
+        sx=(width-sidebar_w)/scale+3
+        sy=top/scale+1
+        sh=(height-footer_h-top-u(6))/scale
+        panel(sx,sy,base_width-11,sy+sh)
         groups=[
             ("Bewölkung",list(range(0,4))),
             ("Niederschlag",list(range(5,8))),
@@ -163,23 +167,21 @@ def frame_png(data, parameter, model, region, run, valid, source=None, portrait_
             ("Gefrierender Regen",[13,14]),
             ("Nebel / Gewitter",[4,15,16]),
         ]
-        available=base_width-56
-        cell=available/6
+        section_h=(sh-12)/len(groups)
         for gi,(group,indices) in enumerate(groups):
-            gx=29+gi*cell
+            gx=sx+11
+            gy=sy+7+gi*section_h
             if gi:
-                d.line((u(gx-10),u(ly+17),u(gx-10),u(ly+128)),fill="#245E83",width=max(1,u(1)))
-            text(gx,ly+13,group,13,WHITE,True)
+                d.line((u(gx),u(gy-4),u(base_width-22),u(gy-4)),
+                       fill="#245E83",width=max(1,u(1)))
+            text(gx,gy,group,11,WHITE,True)
+            row_h=min(22,(section_h-25)/max(len(indices),1))
             for j,idx in enumerate(indices):
                 label,color=CATEGORIES[idx]
-                yy=ly+44+j*34
-                d.rounded_rectangle((u(gx),u(yy),u(gx+24),u(yy+18)),radius=u(2),fill=color)
-                # Wrap longer entries rather than overflowing the next group.
-                words={"Schneeregen mäßig/stark":"Schneeregen\nmäßig/stark",
-                       "Gefr. Regen mäßig/stark":"Gefr. Regen\nmäßig/stark",
-                       "Gewitter leicht/mäßig":"Gewitter\nleicht/mäßig"}
-                name=words.get(label,label)
-                d.multiline_text((u(gx+30),u(yy-2)),name,font=_font(u(11)),fill=WHITE,spacing=u(1))
+                yy=gy+23+j*row_h
+                d.rounded_rectangle((u(gx),u(yy),u(gx+17),u(yy+13)),
+                                    radius=u(2),fill=color)
+                d.text((u(gx+22),u(yy-1)),label,font=_font(u(9)),fill=WHITE)
     fy=(height-footer_h)/scale+3
     d.line((u(11),u(fy-3),width-u(11),u(fy-3)),fill="#244660",width=max(1,u(1)))
     src=source or ("DWD" if model.startswith("ICON") else "NOAA")
