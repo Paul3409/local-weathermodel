@@ -1,7 +1,7 @@
-name: ELBTAL version bump
+name: MeteoOST V2 version policy
 on:
   push:
-    branches: [main]
+    branches: [version-bump-manual-only]
     paths-ignore:
       - 'app_version.py'
       - '.github/workflows/**'
