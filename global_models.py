@@ -233,35 +233,45 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid,parameter="MSLP-An
     fig.patch.set_facecolor("#061C35")
     ax.set_facecolor("#061C35")
     bounds=REGIONS[region]
-    limit=12 if parameter=="T850-Anomalie" else 32
-    levels=np.linspace(-limit,limit,49 if limit==12 else 33)
+    # The two anomaly products have independent palettes and fixed physical scales.
+    from matplotlib.colors import LinearSegmentedColormap
     if parameter=="MSLP-Anomalie":
-        # MeteoOST Premium 2.0: stronger contrasts for small pressure deviations.
-        # Explicitly scoped to MSLP anomalies; T850 retains its existing RdBu_r.
-        from matplotlib.colors import LinearSegmentedColormap
-        mslp_stops=[
-            (-32,"#07364E"),(-24,"#075C80"),(-16,"#087FA3"),
-            (-12,"#009AB5"),(-8,"#13B6C4"),(-5,"#4BCDD1"),
-            (-3,"#81DEE0"),(-2,"#A5E8E6"),(-1,"#C9E9E5"),
-            (0,"#E4E5DE"),(1,"#F4D8AF"),(2,"#F6BE7C"),
-            (3,"#F4A15B"),(5,"#ED7D3D"),(8,"#E35A2C"),
-            (12,"#CE3E29"),(16,"#AF2D27"),(24,"#872127"),
-            (32,"#541B27"),
+        # MeteoOST Premium 2.1: restrained turquoise-to-coral pressure anomalies.
+        limit=32
+        stops=[
+            (-32,"#123C58"),(-24,"#17627E"),(-16,"#2686A1"),
+            (-12,"#42A5B8"),(-8,"#68BDCA"),(-5,"#92D1D5"),
+            (-3,"#B1DEE0"),(-2,"#C7E5E3"),(-1,"#D9E9E6"),
+            (0,"#E8E8E2"),(1,"#F1E0C9"),(2,"#F3D1AA"),
+            (3,"#F0BC8B"),(5,"#EBA475"),(8,"#E38B67"),
+            (12,"#D9725B"),(16,"#C65B50"),(24,"#A9434B"),
+            (32,"#792E42"),
         ]
-        cmap=LinearSegmentedColormap.from_list(
-            "MeteoOST_MSLP_Anomaly_Premium_2",
-            [((value+32)/64,color) for value,color in mslp_stops],
-            N=512,
-        )
-        # Fine levels keep the deliberately narrow +/-1...5 hPa bands visible.
-        levels=np.linspace(-32,32,257)
-        im=ax.contourf(X,Y,delta,levels=levels,cmap=cmap,
-                       norm=TwoSlopeNorm(vcenter=0,vmin=-32,vmax=32),
-                       extend="both")
+        palette_name="MeteoOST_MSLP_Premium_2_1"
+    elif parameter=="T850-Anomalie":
+        # MeteoOST Arctic: violet / ice blue / neutral / yellow / red.
+        limit=12
+        stops=[
+            (-12,"#49347D"),(-10,"#6357A4"),(-8,"#587FCA"),
+            (-5,"#65B0E1"),(-3,"#91CAE9"),(-1,"#C8E6F1"),
+            (0,"#E7EBE8"),(1,"#F2E5BF"),(3,"#F3DCA0"),
+            (5,"#F2B96A"),(7,"#EB8A52"),(9,"#D75042"),
+            (12,"#9B293F"),
+        ]
+        palette_name="MeteoOST_T850_Arctic"
     else:
-        im=ax.contourf(X,Y,delta,levels=levels,cmap="RdBu_r",
-                       norm=TwoSlopeNorm(vcenter=0,vmin=-limit,vmax=limit),
-                       extend="both")
+        raise ValueError(f"Nicht unterstützter Anomalieparameter: {parameter}")
+    cmap=LinearSegmentedColormap.from_list(
+        palette_name,
+        [((value+limit)/(2*limit),color) for value,color in stops],
+        N=512,
+    )
+    levels=np.linspace(-limit,limit,257)
+    im=ax.contourf(
+        X,Y,delta,levels=levels,cmap=cmap,
+        norm=TwoSlopeNorm(vcenter=0,vmin=-limit,vmax=limit),
+        extend="both",
+    )
     if parameter=="MSLP-Anomalie":
         lines=ax.contour(X,Y,pressure,levels=np.arange(940,1081,4),colors="#1b2735",linewidths=.6)
         ax.clabel(lines,inline=True,fontsize=6,fmt="%d")
