@@ -32,6 +32,7 @@ def draw(ax, X, Y, values, region, parameter):
     ys=np.linspace(south+(north-south)*.065,north-(north-south)*.065,nrows)
 
     valid=np.isfinite(x)&np.isfinite(y)&np.isfinite(z)
+    water=None
     if parameter in ("Schneehöhe","Neuschneemenge"):
         # GRIB missing-value sentinels (e.g. 999900 cm) are not measurements.
         valid &= (z>=-0.1)&(z<9000)
@@ -67,9 +68,8 @@ def draw(ax, X, Y, values, region, parameter):
             if distance>tolerance:
                 continue
             # Do not let the nearest land point label an offshore target.
-            if parameter in ("Schneehöhe","Neuschneemenge"):
-                from icon_eu import snow_water_mask
-                if snow_water_mask(x,y)[int(np.abs(y[:,0]-yy).argmin()),int(np.abs(x[0,:]-xx).argmin())]:
+            if water is not None:
+                if water[int(np.abs(y[:,0]-yy).argmin()),int(np.abs(x[0,:]-xx).argmin())]:
                     continue
             value=float(vals[index])
             label=f"{value:.0f}" if unit in ("hPa","gpdam","km/h","%") else f"{value:.1f}"
