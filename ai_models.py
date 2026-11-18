@@ -11,7 +11,7 @@ import requests
 import streamlit as st
 from eccodes import codes_grib_new_from_file, codes_get, codes_get_array, codes_release
 from icon_eu import REGIONS, LOCAL_TZ, render
-from global_models import decode, climatology_on_grid, anomaly_map
+from global_models import decode, climatology_on_grid, t850_climatology_on_grid, anomaly_map
 from model_cycles import recent_cycles
 
 ROOT = "https://nomads.ncep.noaa.gov/pub/data/nccf/com"
@@ -82,18 +82,18 @@ def show(region,forced_model=None,forced_parameter=None):
     lead=st.select_slider("Vorhersagestunde",options=list(range(0,385,6)),value=24,
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="ai_lead_"+model)
-    parameters=["MSLP","T850","T2"] if model=="AIGEFS Mittel" else [
-        "MSLP","T850","T850 + MSLP","T2","Z500 + MSLP","MSLP-Anomalie","Niederschlagssumme"]
+    parameters=["MSLP","T850","T850 + MSLP","T2","Z500 + MSLP","MSLP-Anomalie","T850-Anomalie"]
+    if model=="AIGFS":parameters.append("Niederschlagssumme")
     parameter=forced_parameter if forced_parameter in parameters else st.radio("Parameter",parameters,horizontal=True,key="ai_param_"+model)
     def _calculate_one(lead):
         try:
             with st.spinner("NOAA-Originaldaten laden und Wetterkarte erstellen …"):
-                target="MSLP" if parameter=="MSLP-Anomalie" else parameter
+                target="MSLP" if parameter=="MSLP-Anomalie" else ("T850" if parameter=="T850-Anomalie" else parameter)
                 X,Y,Z=field(model,run,lead,target,region)
                 valid=run+timedelta(hours=lead)
-                if parameter=="MSLP-Anomalie":
-                    baseline=climatology_on_grid(X,Y,valid.month)
-                    png=anomaly_map(X,Y,Z,baseline,region,model,run,valid)
+                if parameter in ("MSLP-Anomalie","T850-Anomalie"):
+                    baseline=(climatology_on_grid(X,Y,valid.month) if parameter=="MSLP-Anomalie" else t850_climatology_on_grid(X,Y,valid.month))
+                    png=anomaly_map(X,Y,Z,baseline,region,model,run,valid,parameter=parameter)
                 else:
                     pressure=field(model,run,lead,"MSLP",region)[2] if parameter in ("T850 + MSLP","Z500 + MSLP") else None
                     name="2-m-Temperatur" if parameter=="T2" else parameter
