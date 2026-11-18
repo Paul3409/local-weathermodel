@@ -852,7 +852,7 @@ def show(region, forced_model=None, forced_parameter=None):
                 if parameter=="Niederschlagsrate" and lead>78:
                     st.info(f"Niederschlagsrate: Mittelwert über die letzten {lead-previous_lead} Stunden (mm/h), nicht einstündiger Niederschlag.")
                 mslp=None
-                if parameter in ("Z500 + MSLP","T850 + MSLP"):
+                if parameter in ("Z500 + MSLP","T850 + MSLP","T850-Anomalie"):
                     if model!="GFS":
                         pressure_files=discover_d2(run,"pmsl") if model=="ICON-D2" else discover(run,"pmsl")
                         _,_,mslp=load_grid(pressure_files[lead],valid,REGIONS[region],"pmsl")
@@ -862,7 +862,7 @@ def show(region, forced_model=None, forced_parameter=None):
                 if model=="GFS" and parameter in ("MSLP-Anomalie","T850-Anomalie"):
                     from global_models import climatology_on_grid, t850_climatology_on_grid, anomaly_map
                     reference=(climatology_on_grid(X,Y,valid.month) if parameter=="MSLP-Anomalie" else t850_climatology_on_grid(X,Y,valid.month))
-                    png=anomaly_map(X,Y,Z,reference,region,model,run,valid,parameter=parameter)
+                    png=anomaly_map(X,Y,Z,reference,region,model,run,valid,parameter=parameter,mslp=mslp)
                 else:
                     png=render(X,Y,Z,region,parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["eu_map"]=(MAP_STYLE_VERSION,model,region,parameter,lead,valid,png)
