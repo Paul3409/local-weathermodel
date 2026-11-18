@@ -706,10 +706,13 @@ if map_region == '🇩🇪 Deutschland Detail':
 if map_region == '🌍 Globalmodelle':
     from global_models import show as show_global_models
     global_area = st.segmented_control('Globales Kartengebiet', ['Mitteleuropa','Europa & Nordatlantik'], default='Europa & Nordatlantik', key='global_area')
-    global_model = st.segmented_control('Globales Modell', ['ECMWF IFS', 'GEFS Mittel', 'AIGFS', 'AIGEFS Mittel'], default='ECMWF IFS', key='global_ai_choice')
+    global_model = st.segmented_control('Globales Modell', ['ECMWF IFS', 'GEFS Mittel', 'GFS', 'AIGFS', 'AIGEFS Mittel'], default='ECMWF IFS', key='global_ai_choice')
     if global_model in ('AIGFS', 'AIGEFS Mittel'):
         from ai_models import show as show_ai_global
         show_ai_global(global_area, forced_model=global_model)
+    elif global_model == 'GFS':
+        from icon_eu import show as show_gfs_global
+        show_gfs_global(global_area, forced_model='GFS')
     else:
         show_global_models(global_area, forced_model=global_model)
     st.stop()
