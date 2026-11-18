@@ -310,6 +310,7 @@ GFS_FIELDS={
     "Windböen":("GUST","surface"),
     "Schneehöhe":("SNOD","surface"),
     "Neuschneemenge":("ASNOW","surface"),
+    "Akkumulierter Niederschlag":("APCP","surface"),
     "Windchill":("TMP","2_m_above_ground"),
     "Windchill-U":("UGRD","10_m_above_ground"),
     "Windchill-V":("VGRD","10_m_above_ground"),
@@ -387,6 +388,42 @@ def load_gfs(url,valid,bounds,parameter):
     finally:
         if path and os.path.exists(path):os.unlink(path)
     raise RuntimeError("GFS-GRIB-Datei enthält kein Feld mit der angeforderten Gültigkeitszeit.")
+
+@st.cache_data(ttl=900,show_spinner=False)
+def gfs_accumulated_precipitation(run,lead,bounds):
+    """Add NOAA APCP intervals only if GRIB step ranges form a continuous chain."""
+    urls=discover_gfs(run,"Akkumulierter Niederschlag",bounds)
+    if lead==0:
+        x,y,z=load_gfs(discover_gfs(run,"MSLP",bounds)[0],run,bounds,"MSLP")
+        return x,y,np.zeros_like(z)
+    X=Y=total=None
+    covered=0
+    for hour in range(3,lead+1,3):
+        url=urls[hour]
+        response=requests.get(url,headers=HEADERS,timeout=100)
+        response.raise_for_status()
+        if not response.content.startswith(b"GRIB"):
+            raise RuntimeError(f"GFS APCP +{hour} h nicht verfügbar.")
+        with tempfile.NamedTemporaryFile(suffix=".grib2",delete=False) as f:
+            f.write(response.content);path=f.name
+        try:
+            with open(path,"rb") as stream:
+                gid=codes_grib_new_from_file(stream)
+                if gid is None:raise RuntimeError("Leere APCP-Datei.")
+                try:
+                    start=int(codes_get(gid,"startStep"))
+                    end=int(codes_get(gid,"endStep"))
+                finally:codes_release(gid)
+        finally:os.unlink(path)
+        if end!=hour or start!=covered:
+            raise RuntimeError(f"APCP-Intervall +{start} bis +{end} h passt nicht an +{covered} h; keine fehlerhafte Summe ausgegeben.")
+        x,y,amount=load_gfs(url,run+timedelta(hours=hour),bounds,"Akkumulierter Niederschlag")
+        if total is None:X,Y=x,y;total=np.zeros_like(amount)
+        if amount.shape!=total.shape or not np.isfinite(amount).all():
+            raise RuntimeError("APCP-Gitter unvollständig.")
+        total+=np.maximum(amount,0)
+        covered=hour
+    return X,Y,total
 
 def windchill_celsius(temp_c, u_ms, v_ms):
     """North-American/Canadian wind chill, using 10-m model wind as a proxy.
@@ -575,6 +612,9 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             label="Windböen (km/h)"
         elif parameter=="Niederschlagsrate":
             stops,vmin,vmax=PREC_RATE,0,100
+        elif parameter=="Akkumulierter Niederschlag":
+            stops,vmin,vmax=PREC_SUM,0,100
+            label="Akkumulierter Niederschlag seit Modellstart (mm = l/m²)"
             label="Niederschlagsrate (mm/h; Mittel des Akkumulationsintervalls)"
         elif parameter=="Niederschlagssumme":
             stops,vmin,vmax=PREC_SUM,0,100
@@ -671,9 +711,12 @@ def show(region, forced_model=None, forced_parameter=None):
     st.caption("ICON-D2: Deutschland bis +48 h stündlich (sofern die DWD-Dateien verfügbar sind). ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
     choices=(["MSLP","T850","T850 + MSLP","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","T850 + MSLP","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","T850 + MSLP","Z500 + MSLP"])
+    if model=="GFS": choices.append("Akkumulierter Niederschlag")
     choices += ["Neuschneemenge","Schneehöhe"]
     if "Windchill" not in choices: choices.append("Windchill")
     parameter=forced_parameter if forced_parameter in choices else st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
+    if parameter=="Akkumulierter Niederschlag":
+        st.caption("GFS-Gesamtniederschlag seit Modellstart (mm = l/m²). APCP-Intervalle werden addiert; lange Vorhersagen können beim ersten Abruf dauern.")
     if parameter=="Neuschneemenge":
         st.caption("ICON: aus akkumuliertem Schneewasseräquivalent (SNOW_GSP + SNOW_CON), 10:1-Umrechnung; Schätzung, keine prognostizierte Schneedeckenänderung. GFS: akkumulierte Schneefallhöhe (ASNOW), falls verfügbar.")
     elif parameter=="Schneehöhe":
@@ -739,7 +782,10 @@ def show(region, forced_model=None, forced_parameter=None):
                     raise RuntimeError(f"Keine passende {model}-Datei für {parameter} +{lead} h im "+("gewählten Lauf" if run_choice is not None else "verfügbaren Lauf")+" gefunden. Bitte einen anderen Lauf oder Prognoseschritt wählen.")
                 run,url,previous_url=selected
                 valid=run+timedelta(hours=lead)
-                X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model!="GFS" else load_gfs(url,valid,REGIONS[region],parameter)
+                if model=="GFS" and parameter=="Akkumulierter Niederschlag":
+                    X,Y,Z=gfs_accumulated_precipitation(run,lead,REGIONS[region])
+                else:
+                    X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model!="GFS" else load_gfs(url,valid,REGIONS[region],parameter)
                 if parameter=="Windchill":
                     if model=="GFS":
                         u_url=discover_gfs(run,"Windchill-U",REGIONS[region])[lead]
