@@ -229,7 +229,7 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid,parameter="MSLP-An
     from matplotlib.colors import TwoSlopeNorm
     from map_design import frame_png, style_figure
     delta=pressure-reference
-    fig,ax=plt.subplots(figsize=(9,11) if region=="Deutschland" else (12,8.5),dpi=120)
+    fig,ax=plt.subplots(figsize=(13.2,8.8),dpi=120)
     fig.patch.set_facecolor("#061C35")
     ax.set_facecolor("#061C35")
     bounds=REGIONS[region]
@@ -302,10 +302,9 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid,parameter="MSLP-An
     ax.set_title("")
     style_figure(fig,ax)
     colorbar.outline.set_edgecolor("#B5C8DC")
-    if region!="Deutschland":
-        # Wide Atlantic-European geographic field: allocate most of the
-        # horizontal canvas to the map instead of a near-square axes box.
-        fig.set_size_inches(15,7.4)
+    if True:
+        # Same landscape map footprint for all regions.
+        fig.set_size_inches(15,7.4) if region=="Europa & Nordatlantik" else fig.set_size_inches(13.2,8.8)
         ax.set_aspect("auto")
         ax.set_position([.055,.11,.82,.84])
         colorbar.ax.set_position([.895,.18,.023,.66])
