@@ -261,7 +261,7 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
         fig.add_artist(Arc((x+w/2,y+h/2),w,h,theta1=t1,theta2=t2,
                            color="#45C8F5",lw=2.4,transform=fig.transFigure))
     fig.add_artist(Line2D([.032,.098],[.92,.92],color="#45C8F5",lw=2.4,transform=fig.transFigure))
-    fig.text(.125,.94,"MeteoOst",color="white",fontsize=24,fontweight="bold")
+    fig.text(.125,.94,"MeteoOST V2",color="white",fontsize=24,fontweight="bold")
     fig.text(.125,.91,"W E T T E R K A R T E N",color="#45C8F5",fontsize=9)
     fig.add_artist(Line2D([.37,.37],[.906,.977],color="#45C8F5",lw=1.5,transform=fig.transFigure))
     title={"msl":"MSLP","t850":"T850","t2":"T2","snow":"Schneehöhenzuwachs" if model=="GEFS" else "Schneefall-Wasseräquivalent"}[field]
@@ -300,7 +300,7 @@ def draw(model,place,run,field,steps,data,precip=None,main=None):
     coverage=np.isfinite(data).mean()*100
     fig.text(.045,.046,f"Daten: {'NOAA' if model=='GEFS' else 'ECMWF'}  |  Ort: {place}  |  Abdeckung: {coverage:.0f} %",
              color="#A9C3D9",fontsize=10)
-    fig.text(.82,.046,f"MeteoOst V{VERSION}",color="white",fontsize=11,fontweight="bold")
+    fig.text(.82,.046,f"MeteoOST V2 | v{VERSION}",color="white",fontsize=11,fontweight="bold")
     out=io.BytesIO();fig.savefig(out,format="png",facecolor=fig.get_facecolor())
     plt.close(fig)
     return out.getvalue()
@@ -320,9 +320,9 @@ def _rebrand_archived_png(raw):
     footer_font=ImageFont.truetype(font_path,max(10,round(width*11/1620)))
     # Matplotlib figure positions are bottom-origin; Pillow is top-origin.
     draw.rectangle((int(width*.122),int(height*.025),int(width*.365),int(height*.081)),fill="#071B30")
-    draw.text((int(width*.125),int(height*.033)),"MeteoOst",font=title_font,fill="white",stroke_width=0)
+    draw.text((int(width*.125),int(height*.033)),"MeteoOST V2",font=title_font,fill="white",stroke_width=0)
     draw.rectangle((int(width*.815),int(height*.930),int(width*.965),int(height*.969)),fill="#0C2946")
-    draw.text((int(width*.82),int(height*.944)),f"MeteoOst V{VERSION}",font=footer_font,fill="white")
+    draw.text((int(width*.82),int(height*.944)),f"MeteoOST V2 | v{VERSION}",font=footer_font,fill="white")
     out=io.BytesIO()
     picture.save(out,format="PNG")
     return out.getvalue()
@@ -331,7 +331,7 @@ def _rebrand_archived_png(raw):
 def show():
     """Instant display of already published diagrams, without model downloads."""
     from ensemble_archive import available_images
-    st.subheader("📊 MeteoOst · Ensemble-Diagramme")
+    st.subheader("📊 MeteoOST V2 | v2.0.0 · Ensemble-Diagramme")
     model=st.segmented_control("Ensemble",["GEFS","ECMWF ENS"],default="GEFS",key="ens_model")
     place=st.selectbox("Ort",list(PLACES),key="ens_place")
     parameter=st.selectbox("Parameter",list(FIELDS),key="ens_param")
@@ -374,5 +374,5 @@ def show():
     st.image(branded_png,use_container_width=True)
     st.download_button("Ensemble als PNG herunterladen",branded_png,
                        file_name=result.name,mime="image/png",key="ens_archive_download")
-    st.caption("NOAA/ECMWF-Originaldaten · vorab berechnete MeteoOst-Grafik. "
+    st.caption("NOAA/ECMWF-Originaldaten · vorab berechnete MeteoOST-V2-Grafik. "
                "Neue Modellläufe erscheinen automatisch nach der Veröffentlichung durch den GitHub-Workflow.")
