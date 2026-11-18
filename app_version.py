@@ -1,2 +1,2 @@
-"""Central ELBTAL application release version. Managed by the version workflow."""
-VERSION = "1.31.19"
+"""Central MeteoOST V2 application release version."""
+VERSION = "2.0.0"
