@@ -41,7 +41,7 @@ TEMP_STOPS = [(-20,"#9851BD"),(-15,"#4C207F"),(-10,"#16346E"),(-5,"#3377C6"),(0,
 GUST_STOPS = [(0,"#499FE1"),(10,"#204D99"),(20,"#347B4A"),(30,"#A3BE4B"),(40,"#E8D24A"),(50,"#F3A143"),(60,"#E96A38"),(70,"#DB3834"),(80,"#B9252E"),(90,"#811A2C"),(100,"#48205F"),(110,"#853AA8"),(120,"#C52D9A")]
 PREC_RATE = [(0,"#F2F5F7"),(.1,"#C8EAF7"),(.5,"#80C9EC"),(1,"#368DD1"),(2,"#2269A9"),(5,"#3B9A68"),(10,"#C4C948"),(15,"#F1D34E"),(20,"#F3A04A"),(30,"#E85A38"),(50,"#C72F43"),(75,"#83215F"),(100,"#C137A8")]
 PREC_SUM = [(0,"#F2F5F7"),(.5,"#D1F2ED"),(1,"#91DCD8"),(2,"#51B9D4"),(5,"#3787C1"),(10,"#2465A0"),(15,"#3D986A"),(20,"#A8C34E"),(30,"#E6D14B"),(40,"#F1A24D"),(50,"#E46840"),(75,"#C43D53"),(100,"#793A94")]
-GFS_ACCUM_PREC_SUM = PREC_SUM + [(125,"#682E92"),(150,"#552783"),(175,"#412273"),(200,"#30195C"),(250,"#1B103D")]
+ACCUMULATED_PRECIP_COLORS = [(0,"#FFFFFF"),(1,"#BDEBFF"),(2,"#237DD6"),(5,"#103A83"),(10,"#145338"),(20,"#4E9A51"),(30,"#F2D53C"),(40,"#F29A38"),(50,"#E34237"),(60,"#B92731"),(80,"#751728"),(100,"#8639B6"),(125,"#C88BE9"),(150,"#FFFFFF"),(175,"#B9BEC6"),(200,"#777F8B"),(250,"#303640")]
 
 class Links(HTMLParser):
     def __init__(self):
@@ -627,10 +627,10 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             label="Windböen (km/h)"
         elif parameter=="Niederschlagsrate":
             stops,vmin,vmax=PREC_RATE,0,100
-        elif parameter=="Akkumulierter Niederschlag":
-            stops,vmin,vmax=GFS_ACCUM_PREC_SUM,0,250
-            label="Akkumulierter Niederschlag seit Modellstart (mm = l/m²)"
             label="Niederschlagsrate (mm/h; Mittel des Akkumulationsintervalls)"
+        elif parameter=="Akkumulierter Niederschlag":
+            stops,vmin,vmax=ACCUMULATED_PRECIP_COLORS,0,250
+            label="Akkumulierter Niederschlag seit Modellstart (mm = l/m²)"
         elif parameter=="Niederschlagssumme":
             stops,vmin,vmax=PREC_SUM,0,100
             label="Niederschlagssumme seit Modellstart (mm = l/m²)"
@@ -644,7 +644,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         elif parameter=="Windböen":
             contours=np.arange(0,121,10)
         elif parameter=="Akkumulierter Niederschlag":
-            contours=[.5,1,2,5,10,20,30,50,75,100,125,150,175,200]
+            contours=[1,2,5,10,20,30,40,50,60,80,100,125,150,175,200]
         else:
             contours=[.5,1,2,5,10,20,30,50,75]
         lo,hi=float(np.nanmin(Z)),float(np.nanmax(Z))
@@ -688,7 +688,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     elif parameter=="Windböen":
         cb.set_ticks(np.arange(0,121,10))
     elif parameter=="Akkumulierter Niederschlag":
-        cb.set_ticks([0,10,20,30,50,75,100,125,150,200,250])
+        cb.set_ticks([0,1,2,5,10,20,30,40,50,60,80,100,125,150,175,200,250])
     else:
         cb.set_ticks([0,10,20,30,50,75,100])
     if parameter!="Signifikantes Wetter":
