@@ -309,6 +309,8 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid,parameter="MSLP-An
         ax.set_aspect("auto")
         ax.set_position([.055,.11,.82,.84])
         colorbar.ax.set_position([.895,.18,.023,.66])
+    from value_grid import draw as draw_value_grid
+    draw_value_grid(ax,X,Y,delta,region,parameter)
     out=io.BytesIO();fig.savefig(out,format="png",bbox_inches="tight");plt.close(fig)
     return frame_png(out.getvalue(),parameter,model,region,run,valid)
 
