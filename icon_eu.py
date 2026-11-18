@@ -660,6 +660,9 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             ax.clabel(lines,inline=True,fontsize=6,fmt="%g")
     # Only the accumulated-precipitation map gets high-contrast borders.
     ax._meteoost_emphasize_precip_borders = (parameter=="Akkumulierter Niederschlag")
+    # Double-stroke outlines are needed only on the high-contrast accumulated
+    # precipitation palette; all other map styles remain untouched.
+    ax._meteoost_emphasize_precip_borders = (parameter=="Akkumulierter Niederschlag")
     try:
         data=borders(COUNTRIES)
         for feature in data.get("features",[]):
