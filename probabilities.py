@@ -218,13 +218,18 @@ def calculate(model,run,region,parameter,hours,progress=None):
     if len(jobs)>3500:raise RuntimeError("Datenmenge für eine Einzelberechnung zu groß.")
     grids={}
     failed={}
+    failure_reasons={}
     with ThreadPoolExecutor(max_workers=6) as pool:
         futures={pool.submit(_member_step,model,run,t,m,variable,level,region,member_urls):(m,t)
                  for m,t in jobs}
         for i,future in enumerate(as_completed(futures),1):
             m,t=futures[future]
             try:grids[m,t]=future.result()
-            except Exception:failed.setdefault(m,[]).append(t)
+            except Exception as exc:
+                failed.setdefault(m,[]).append(t)
+                # Keep the actual reason; missing field, HTTP error and
+                # invalid accumulation are different failure modes.
+                failure_reasons.setdefault(m,[]).append(f"+{t}h: {str(exc)[:120]}")
             if progress:progress.progress(i/len(jobs),text=f"Ensemblefelder {i}/{len(jobs)}")
     # An incomplete temporal series invalidates the whole member.
     good=[]
@@ -236,12 +241,14 @@ def calculate(model,run,region,parameter,hours,progress=None):
             failed.setdefault(m,[])
             continue
         series=np.stack([grids[m,t][2] for t in expected_steps])
-        if not np.isfinite(series).all():
-            failed.setdefault(m,[])
-            continue
+        # Interpolation may produce NaN at coastal/boundary grid cells.
+        # Such pixels must be masked locally, not invalidate an entire member.
         try:
             if kind=="temp":
-                field=np.max(series,axis=0) if parameter.startswith("Tmax") else np.min(series,axis=0)
+                with np.errstate(all="ignore"):
+                    field=np.nanmax(series,axis=0) if parameter.startswith("Tmax") else np.nanmin(series,axis=0)
+                # All forecast times must exist at each pixel.
+                field=np.where(np.isfinite(series).all(axis=0),field,np.nan)
             elif kind=="snow":
                 raise RuntimeError("Schneefallrisiko benötigt echte 24-h-Schneefallakkumulationen.")
             else:
@@ -260,7 +267,7 @@ def calculate(model,run,region,parameter,hours,progress=None):
                     chosen.append(idx)
                     cursor=start
                 field=np.sum(series[chosen],axis=0)
-            if not np.isfinite(field).all():
+            if not np.isfinite(field).any():
                 failed.setdefault(m,[])
                 continue
         except ValueError:
@@ -274,13 +281,18 @@ def calculate(model,run,region,parameter,hours,progress=None):
     if len(good)<required:
         raise RuntimeError(
             f"Zu wenige vollständige Ensemblemitglieder: {len(good)}/{total} "
-            f"(mindestens {required} erforderlich). Keine verlässliche Karte möglich.")
+            f"(mindestens {required} erforderlich). "
+            f"Fehlerbeispiele: {list(failure_reasons.items())[:3]}. "
+            "Keine verlässliche Karte möglich.")
     threshold=dict(CATEGORIES["Temperatur"] if kind=="temp" else CATEGORIES["Niederschlag"])[parameter]
     op="<" if "<" in parameter else ">"
-    result,count=probability(np.stack(fields),threshold,op,min_members=len(good))
+    # Per-pixel denominators count only members with valid data at that cell.
+    # At least 70% of all expected members must be present locally.
+    result,count=probability(np.stack(fields),threshold,op,min_members=required)
     quality={"available":len(good),"total":total,
              "missing":sorted(set(members)-set(good)),
-             "missing_steps":{m:sorted(set(failed.get(m,[]))) for m in members if m not in good}}
+             "missing_steps":{m:sorted(set(failed.get(m,[]))) for m in members if m not in good},
+             "failure_reasons":{m:failure_reasons.get(m,[])[:3] for m in members if m not in good}}
     return X,Y,result,quality
 
 
