@@ -111,5 +111,5 @@ def show():
             else:
                 st.image(png,use_container_width=True)
                 st.download_button(f"{model} · PNG herunterladen",png,
-                    file_name=f"ELBTAL_Vergleich_{model.replace(' ','_')}_{target:%Y%m%d%H}.png",
+                    file_name=f"MeteoOST_V2_Vergleich_{model.replace(' ','_')}_{target:%Y%m%d%H}.png",
                     mime="image/png",key=f"v2_cmp_download_{model}")
