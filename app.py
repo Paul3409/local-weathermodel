@@ -630,7 +630,7 @@ if st.session_state.get("_meteoost_brand_revision") != "meteoost-v2-0-0-brand":
         "krumet_images", *IMAGE_KEYS.values(),
     ):
         st.session_state.pop(_map_cache_key, None)
-    st.session_state["_meteoost_brand_revision"] = "meteoost-2026-11-r2"
+    st.session_state["_meteoost_brand_revision"] = "meteoost-v2-0-0-brand"
     # Old cached PNG bytes can outlive deployments even after code changes.
     st.cache_data.clear()
 st.markdown(
