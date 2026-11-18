@@ -110,6 +110,40 @@ def get_field(model,run,lead,parameter,bounds):
     raw=ecmwf_bytes(run,lead,parameter) if model=="ECMWF IFS" else gefs_bytes(run,lead,parameter,bounds)
     return decode(raw,run+timedelta(hours=lead),bounds,parameter)
 
+def _read_noaa_netcdf(raw,variable_name,month,level=None):
+    """Read NOAA classic NetCDF or NetCDF4; return coordinates and scaled values."""
+    import h5py
+    try:
+        with h5py.File(io.BytesIO(raw),"r") as nc:
+            lat=np.asarray(nc["lat"][:],dtype=float)
+            lon=np.asarray(nc["lon"][:],dtype=float)
+            var=nc[variable_name]
+            if level is None:
+                values=np.asarray(var[month-1],dtype=float)
+            else:
+                levels=np.asarray(nc["level"][:],dtype=float)
+                ix=int(np.argmin(abs(levels-level)))
+                if abs(levels[ix]-level)>1:raise ValueError("Druckniveau fehlt.")
+                values=np.asarray(var[month-1,ix],dtype=float)
+            scale=float(np.asarray(var.attrs.get("scale_factor",1)).reshape(-1)[0])
+            offset=float(np.asarray(var.attrs.get("add_offset",0)).reshape(-1)[0])
+    except OSError:
+        from scipy.io import netcdf_file
+        with netcdf_file(io.BytesIO(raw),"r",mmap=False) as nc:
+            lat=np.asarray(nc.variables["lat"][:],dtype=float).copy()
+            lon=np.asarray(nc.variables["lon"][:],dtype=float).copy()
+            var=nc.variables[variable_name]
+            if level is None:
+                values=np.asarray(var[month-1],dtype=float).copy()
+            else:
+                levels=np.asarray(nc.variables["level"][:],dtype=float)
+                ix=int(np.argmin(abs(levels-level)))
+                if abs(levels[ix]-level)>1:raise ValueError("Druckniveau fehlt.")
+                values=np.asarray(var[month-1,ix],dtype=float).copy()
+            scale=float(getattr(var,"scale_factor",1))
+            offset=float(getattr(var,"add_offset",0))
+    return lat,lon,values*scale+offset
+
 @st.cache_data(ttl=7*86400,show_spinner=False)
 def monthly_pressure_climatology(month):
     """NOAA PSL NCEP/NCAR Reanalysis 1, monthly MSLP normals 1991-2020 (hPa)."""
@@ -123,13 +157,7 @@ def monthly_pressure_climatology(month):
         try:
             response=requests.get(url,headers=HEADERS,timeout=45)
             response.raise_for_status()
-            with h5py.File(io.BytesIO(response.content),"r") as nc:
-                lat=np.asarray(nc["lat"][:],dtype=float)
-                lon=np.asarray(nc["lon"][:],dtype=float)
-                values=np.asarray(nc["slp"][month-1],dtype=float)
-                scale=np.asarray(nc["slp"].attrs.get("scale_factor",1),dtype=float).reshape(-1)[0]
-                offset=np.asarray(nc["slp"].attrs.get("add_offset",0),dtype=float).reshape(-1)[0]
-                values=values*scale+offset
+            lat,lon,values=_read_noaa_netcdf(response.content,"slp",month)
             if values.shape!=(len(lat),len(lon)) or not 950<float(np.nanmedian(values))<1060:
                 raise ValueError("Ungültige MSLP-Klimatologie.")
             return lat,lon,values
@@ -150,17 +178,7 @@ def monthly_t850_climatology(month):
         try:
             response=requests.get(url,headers=HEADERS,timeout=60)
             response.raise_for_status()
-            with h5py.File(io.BytesIO(response.content),"r") as nc:
-                lat=np.asarray(nc["lat"][:],dtype=float)
-                lon=np.asarray(nc["lon"][:],dtype=float)
-                levels=np.asarray(nc["level"][:],dtype=float)
-                level_idx=int(np.argmin(np.abs(levels-850)))
-                if abs(levels[level_idx]-850)>1:raise ValueError("850-hPa-Niveau fehlt.")
-                variable=nc["air"]
-                values=np.asarray(variable[month-1,level_idx],dtype=float)
-                scale=float(np.asarray(variable.attrs.get("scale_factor",1)).reshape(-1)[0])
-                offset=float(np.asarray(variable.attrs.get("add_offset",0)).reshape(-1)[0])
-                values=values*scale+offset
+            lat,lon,values=_read_noaa_netcdf(response.content,"air",month,level=850)
             if values.shape!=(len(lat),len(lon)) or not np.isfinite(values).all():
                 raise ValueError("Ungültiges T850-Klimatologiegitter.")
             if 150<float(np.nanmedian(values))<350:values=values-273.15
