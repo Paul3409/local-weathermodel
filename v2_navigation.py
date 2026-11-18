@@ -29,11 +29,11 @@ CAPABILITIES = {
         "Europa & Nordatlantik": SYNOPTIC + ["MSLP-Anomalie","T850-Anomalie","Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill"],
     },
     "ECMWF IFS": {region: SYNOPTIC + ["MSLP-Anomalie", "T2", "Schneehöhe"] for region in ALL_REGIONS},
-    "GEFS Mittel": {region: SYNOPTIC + ["MSLP-Anomalie","T850-Anomalie"] for region in ALL_REGIONS},
+    "GEFS Mittel": {region: SYNOPTIC + ["MSLP-Anomalie","T850-Anomalie","Akkumulierter Niederschlag"] for region in ALL_REGIONS},
     "AIGFS": {region: ["MSLP", "T850", "T850 + MSLP", "T2",
                             "Z500 + MSLP", "MSLP-Anomalie", "T850-Anomalie", "Niederschlagssumme"]
               for region in ALL_REGIONS},
-    "AIGEFS Mittel": {region: ["MSLP", "T850", "T850 + MSLP", "Z500 + MSLP", "MSLP-Anomalie", "T850-Anomalie", "T2"] for region in ALL_REGIONS},
+    "AIGEFS Mittel": {region: ["MSLP", "T850", "T850 + MSLP", "Z500 + MSLP", "MSLP-Anomalie", "T850-Anomalie", "T2", "Akkumulierter Niederschlag"] for region in ALL_REGIONS},
 }
 
 def dropdown(title, key, options):
@@ -96,7 +96,7 @@ def show_model_maps():
             st.caption(note)
 
 def show():
-    st.caption("MeteoOST V2 | v2.1.1 · zentrale Navigation")
+    st.caption("MeteoOST V2 | v2.2.0 · zentrale Navigation")
     section=dropdown("Bereich", "v2_section",
                      ["Modelle", "Modellvergleich", "Ensembles", "Radar"])
     if section=="Modelle":
