@@ -1,4 +1,4 @@
-# MeteoOst-T2M v0.5.3 – ESA WorldCover statt Overpass
+# MeteoOST V2 | v2.0.0
 
 Die ICON-D2-Prognose, Geländekorrektur, vier PNG-Kartentypen und das
 Streamlit-Kartenarchiv bleiben erhalten.
