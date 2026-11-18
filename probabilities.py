@@ -87,6 +87,22 @@ def _decode(raw,variable,region):
                 values=np.asarray(codes_get_array(gid,"values"),dtype=float)
                 # GRIB precipitation and snow water equivalent: kg/m² = mm.
                 if variable=="TMP":values-=273.15
+                if variable=="APCP":
+                    # Inspect the GRIB statistical time interval. NOAA can
+                    # publish 3h/6h and overlapping accumulations at the
+                    # same forecast step. Only non-overlapping consecutive
+                    # windows may be added.
+                    try:
+                        start=int(codes_get(gid,"startStep"))
+                        end=int(codes_get(gid,"endStep"))
+                        step_type=str(codes_get(gid,"stepType"))
+                    except Exception as exc:
+                        raise RuntimeError("APCP-Akkumulationsintervall fehlt.") from exc
+                    if step_type!="accum" or end<=start:
+                        raise RuntimeError(f"APCP ist keine gültige Akkumulation: {step_type}, {start}-{end}.")
+                    interval=(start,end)
+                else:
+                    interval=None
                 if variable=="WEASD" and short in ("sd","sf"):
                     values*=1000
             finally:codes_release(gid)
@@ -102,7 +118,7 @@ def _decode(raw,variable,region):
     X,Y=np.meshgrid(np.linspace(west,east,nx),np.linspace(south,north,ny))
     Z=griddata(np.column_stack((lons[mask],lats[mask])),values[mask],
                (X,Y),method="linear")
-    return X,Y,Z
+    return (X,Y,Z,interval) if variable=="APCP" else (X,Y,Z)
 
 
 @st.cache_data(ttl=3600,show_spinner=False)
@@ -199,7 +215,7 @@ def calculate(model,run,region,parameter,hours,progress=None):
     # Prevent silent partial datasets: all requested hours and members
     # must be present. Concurrency is deliberately bounded.
     jobs=[(m,t) for m in members for t in timeline if t>0]
-    if len(jobs)>2400:raise RuntimeError("Datenmenge für eine Einzelberechnung zu groß.")
+    if len(jobs)>3500:raise RuntimeError("Datenmenge für eine Einzelberechnung zu groß.")
     grids={}
     with ThreadPoolExecutor(max_workers=6) as pool:
         futures={pool.submit(_member_step,model,run,t,m,variable,level,region,member_urls):(m,t)
@@ -223,10 +239,28 @@ def calculate(model,run,region,parameter,hours,progress=None):
             # event. Refuse to publish this as snowfall risk.
             raise RuntimeError("Schneefallrisiko benötigt echte 24-h-Schneefallakkumulationen (nicht WEASD).")
         else:
-            raise RuntimeError("APCP-Intervalle müssen anhand GRIB stepRange "
-                               "und stepType verifiziert werden; keine ungeprüfte Summierung.")
+            intervals=[grids[m,t][3] for t in timeline if t>0]
+            # GEFS commonly publishes overlapping 3h/6h accumulations.
+            # Choose an exact, contiguous partition of [0, hours], and
+            # never count the same precipitation twice.
+            by_end={}
+            for idx,(start,end) in enumerate(intervals):
+                if end not in by_end or start>intervals[by_end[end]][0]:
+                    by_end[end]=idx
+            chosen=[]
+            cursor=hours
+            while cursor>0:
+                if cursor not in by_end:
+                    raise RuntimeError(f"APCP-Abdeckung fehlt vor +{cursor} h.")
+                idx=by_end[cursor]
+                start,end=intervals[idx]
+                if start>=cursor:
+                    raise RuntimeError("Ungültige APCP-Intervallfolge.")
+                chosen.append(idx)
+                cursor=start
+            field=np.sum(series[chosen],axis=0)
         fields.append(field)
-    threshold=dict(CATEGORIES["Temperatur"])[parameter]
+    threshold=dict(CATEGORIES["Temperatur"] if kind=="temp" else CATEGORIES["Niederschlag"])[parameter]
     op="<" if "<" in parameter else ">"
     # Reject cells with missing members or steps instead of using nanmax
     data=np.stack(fields)
@@ -298,10 +332,6 @@ def show():
         if category=="Schnee":
             st.warning("Schneefallrisiko wird erst aktiviert, wenn echte 24-h-Schneefallfelder "
                        "pro Ensemblemitglied verfügbar sind.")
-            return
-        if category=="Niederschlag":
-            st.warning("Niederschlagswahrscheinlichkeiten werden erst aktiviert, wenn "
-                       "APCP-Akkumulationsintervalle pro Mitglied geprüft sind.")
             return
         bar=st.progress(0)
         try:
