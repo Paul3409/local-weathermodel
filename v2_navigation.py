@@ -68,6 +68,8 @@ def show_model_maps():
     regions=list(CAPABILITIES[model])
     region=dropdown("2. Region", "v2_region", regions)
     parameter=dropdown("3. Parameter", "v2_parameter", CAPABILITIES[model][region])
+    st.checkbox("🔢 Zahlengitter auf der Karte anzeigen",value=False,key="v2_value_grid",
+                help="Beschriftet echte Modellgitterwerte. Für eine geänderte Einstellung die Karte neu berechnen.")
     with collect_explanations() as notes:
         if model=="ICON-D2-RUC":
             import icon_d2_ruc
@@ -94,7 +96,7 @@ def show_model_maps():
             st.caption(note)
 
 def show():
-    st.caption("MeteoOST V2 | v2.0.0 · zentrale Navigation")
+    st.caption("MeteoOST V2 | v2.1.1 · zentrale Navigation")
     section=dropdown("Bereich", "v2_section",
                      ["Modelle", "Modellvergleich", "Ensembles", "Wahrscheinlichkeiten", "Radar"])
     if section=="Modelle":
