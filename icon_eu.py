@@ -174,7 +174,14 @@ def plot_geometry(ax,geom,linewidth):
         for ring in polygon:
             if len(ring)>1:
                 arr=np.asarray(ring,dtype=float)
-                if getattr(ax,"_meteoost_emphasize_precip_borders",False) or getattr(ax,"_meteoost_emphasize_ww_borders",False):
+                if getattr(ax,"_meteoost_emphasize_ww_borders",False):
+                    # Black outer stroke + narrow white inner stroke, both
+                    # drawn above the weather raster; country and state lines.
+                    ax.plot(arr[:,0],arr[:,1],color="#090D14",
+                            linewidth=linewidth+1.0,alpha=1,zorder=12)
+                    ax.plot(arr[:,0],arr[:,1],color="#FFFFFF",
+                            linewidth=linewidth*.72,alpha=1,zorder=13)
+                elif getattr(ax,"_meteoost_emphasize_precip_borders",False):
                     # Light halo keeps country outlines legible on dark blue/red
                     # as well as light yellow/white precipitation backgrounds.
                     ax.plot(arr[:,0],arr[:,1],color="#F5F7FA",linewidth=linewidth+1.5,alpha=.95,zorder=8)
@@ -696,6 +703,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
             ax.clabel(lines,inline=True,fontsize=6,fmt="%g")
     # Only the accumulated-precipitation map gets high-contrast borders.
     ax._meteoost_emphasize_precip_borders = (parameter=="Akkumulierter Niederschlag")
+    ax._meteoost_emphasize_ww_borders = (parameter=="Signifikantes Wetter")
     # Double-stroke outlines are needed only on the high-contrast accumulated
     # precipitation palette; all other map styles remain untouched.
     ax._meteoost_emphasize_precip_borders = (parameter=="Akkumulierter Niederschlag")
