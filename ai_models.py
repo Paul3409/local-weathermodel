@@ -84,12 +84,19 @@ def show(region,forced_model=None,forced_parameter=None):
         key="ai_lead_"+model)
     parameters=["MSLP","T850","T850 + MSLP","T2","Z500 + MSLP","MSLP-Anomalie","T850-Anomalie"]
     if model=="AIGFS":parameters.append("Niederschlagssumme")
+    if model=="AIGEFS Mittel":parameters.append("Akkumulierter Niederschlag")
     parameter=forced_parameter if forced_parameter in parameters else st.radio("Parameter",parameters,horizontal=True,key="ai_param_"+model)
+    if parameter=="Akkumulierter Niederschlag":
+        st.caption("Akkumulierter Niederschlag seit Modellstart (mm) aus NOAA-AIGEFS-Ensemblemittel; GRIB-Intervalle werden geprüft.")
     def _calculate_one(lead):
         try:
             with st.spinner("NOAA-Originaldaten laden und Wetterkarte erstellen …"):
                 target="MSLP" if parameter=="MSLP-Anomalie" else ("T850" if parameter=="T850-Anomalie" else parameter)
-                X,Y,Z=field(model,run,lead,target,region)
+                if parameter=="Akkumulierter Niederschlag":
+                    from ensemble_precip import accumulated_mean
+                    X,Y,Z=accumulated_mean(model,run,lead,region)
+                else:
+                    X,Y,Z=field(model,run,lead,target,region)
                 valid=run+timedelta(hours=lead)
                 if parameter in ("MSLP-Anomalie","T850-Anomalie"):
                     baseline=(climatology_on_grid(X,Y,valid.month) if parameter=="MSLP-Anomalie" else t850_climatology_on_grid(X,Y,valid.month))
