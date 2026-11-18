@@ -933,4 +933,4 @@ def show(region, forced_model=None, forced_parameter=None):
         _,_,_,_,_,valid,png=result
         st.caption(f"Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z} · Modellzeitpunkt UTC: {valid:%d.%m.%Y %H:%M}")
         st.image(png,width="stretch")
-        st.download_button("PNG herunterladen",png,file_name=f"MeteoOst_{model}_{region}_{parameter}_{valid:%Y%m%d_%H%M}.png",mime="image/png")
+        st.download_button("PNG herunterladen",png,file_name=f"MeteoOST_V2_{model}_{region}_{parameter}_{valid:%Y%m%d_%H%M}.png",mime="image/png")
