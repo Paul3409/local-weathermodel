@@ -24,7 +24,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Mitteleuropa": (2.0, 27.0, 44.0, 58.0), "Europa & Nordatlantik": (-65.0, 65.0, 32.0, 72.0)}
 HEADERS = {"User-Agent": "MeteoOst weather visualization (educational)"}
-MAP_STYLE_VERSION = "meteoost-v2-1-1"
+MAP_STYLE_VERSION = "meteoost-v2-2-0-alpine"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -458,6 +458,15 @@ def windchill_celsius(temp_c, u_ms, v_ms):
     calculated=13.12+0.6215*temp_c-11.37*np.power(np.maximum(speed_kmh,0.01),0.16)+0.3965*temp_c*np.power(np.maximum(speed_kmh,0.01),0.16)
     return np.where((temp_c<=10)&(speed_kmh>4.8),calculated,temp_c)
 
+# Alpine Precision: 25 discrete snow-depth classes in cm.
+# Zero and traces below 0.5 cm are green; >=0.5 cm is visibly snow-coloured.
+SNOW_DEPTH_EDGES=[0,.5,1,1.5,2,2.5,3,4,5,6,8,10,12,15,20,25,30,40,50,60,75,100,125,150,200,float("inf")]
+SNOW_DEPTH_COLORS=[
+    "#398B46","#D6F3FF","#BCE9FF","#A4DFFC","#8DD4F5",
+    "#76C8EF","#B5E9FC","#9EDFF8","#8DD7F5","#75CAEF",
+    "#60BFE8","#4EA9DC","#398FD3","#2C7BC5","#2664B7",
+    "#2E58AA","#354A9D","#4B49A5","#634AAB","#7E5AAF",
+    "#9B70BC","#B48CC8","#C9A4D3","#DBB7DB","#E8D4EC"]
 SNOW_STOPS=[(0.1,"#1BC33A"),(0.5,"#D8F6FC"),(1,"#A5E8F8"),(2,"#6DCEEF"),(5,"#339EDB"),(10,"#1765B9"),(20,"#5949BA"),(30,"#9853C8"),(50,"#D95AB6"),(75,"#EF779A"),(100,"#F7C7DF"),(150,"#FFFFFF")]
 def snow_water_mask(X,Y):
     """Rasterize actual land polygons; ocean and lakes outside polygons remain blue."""
@@ -483,7 +492,26 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     fig.patch.set_facecolor("#f6f8fa")
     if regional_mask:
         ax.set_facecolor("#8a939f")  # Grey denotes outside ICON-EU domain.
-    if parameter in ("Neuschneemenge","Schneehöhe"):
+    if parameter=="Schneehöhe":
+        from matplotlib.colors import ListedColormap, BoundaryNorm
+        snow=np.ma.masked_invalid(np.ma.asarray(Z,dtype=float))
+        if snow.count()==0:
+            raise RuntimeError("Keine gültigen Schneehöhendaten im Kartengebiet.")
+        if float(snow.min()) < -0.1:
+            raise RuntimeError("Schneehöhe enthält unplausible negative Werte.")
+        snow=np.ma.maximum(snow,0)
+        cmap=ListedColormap(SNOW_DEPTH_COLORS,name="Alpine_Precision")
+        cmap.set_bad("#9CA3AF")  # Missing data are not interpreted as snow-free.
+        norm=BoundaryNorm(SNOW_DEPTH_EDGES,cmap.N,clip=False)
+        im=ax.pcolormesh(X,Y,snow,cmap=cmap,norm=norm,shading="nearest",rasterized=True)
+        # Blue is reserved for actual water; snow-free land stays green.
+        from matplotlib.colors import ListedColormap as _Listed
+        water=snow_water_mask(X,Y)
+        ocean_mask=water & (~np.ma.getmaskarray(snow))
+        ax.pcolormesh(X,Y,np.ma.masked_where(~ocean_mask,np.ones(snow.shape)),
+                      cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
+        label="Schneehöhe (cm) · Alpine Precision"
+    elif parameter=="Neuschneemenge":
         from matplotlib.colors import ListedColormap, BoundaryNorm
         edges=[0,.1,.5,1,2,5,10,20,30,50,75,100,150,10000]
         colors=[c for _,c in SNOW_STOPS]
@@ -491,12 +519,12 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         cmap=ListedColormap(colors)
         norm=BoundaryNorm(edges,cmap.N)
         im=ax.pcolormesh(X,Y,np.maximum(Z,0),cmap=cmap,norm=norm,shading="nearest",rasterized=True)
-        # Water blue is a geographic background category, never a snow measurement.
         from matplotlib.colors import ListedColormap as _Listed
         water=snow_water_mask(X,Y)
-        ocean_mask=(~water) & (~np.ma.getmaskarray(Z))
-        ax.pcolormesh(X,Y,np.ma.masked_where(~ocean_mask,np.ones(Z.shape)),cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
-        label="Schneehöhe (cm)" if parameter=="Schneehöhe" else "Berechnete Neuschneehöhe seit Modellstart (cm; 10:1-Schätzung bei ICON)"
+        ocean_mask=water & (~np.ma.getmaskarray(np.ma.masked_invalid(Z)))
+        ax.pcolormesh(X,Y,np.ma.masked_where(~ocean_mask,np.ones(Z.shape)),
+                      cmap=_Listed(["#2368AD"]),vmin=0,vmax=1,shading="nearest",zorder=3,rasterized=True)
+        label="Berechnete Neuschneehöhe seit Modellstart (cm; 10:1-Schätzung bei ICON)"
     elif parameter=="Z500 + MSLP":
         from matplotlib.colors import LinearSegmentedColormap, ListedColormap, BoundaryNorm
         if mslp is None or mslp.shape!=Z.shape:
@@ -686,7 +714,10 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         cb=fig.colorbar(im,ax=ax,orientation="vertical",pad=.035,fraction=.045)
     if parameter=="Signifikantes Wetter":
         pass
-    elif parameter in ("Neuschneemenge","Schneehöhe"):
+    elif parameter=="Schneehöhe":
+        cb.set_ticks([0,1,5,10,20,50,100,200])
+        cb.set_ticklabels(["0","1","5","10","20","50","100","200+"])
+    elif parameter=="Neuschneemenge":
         cb.set_ticks([.1,1,5,10,20,30,50,75,100,150])
     elif parameter=="Z500 + MSLP":
         cb.set_ticks(sorted(set(np.arange(480,601,10).tolist()+[552])))
