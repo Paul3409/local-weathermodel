@@ -326,8 +326,11 @@ def show(region, forced_model=None, forced_parameter=None):
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="global_lead_"+model)
     parameters=["MSLP","T850","T850 + MSLP","Z500 + MSLP","MSLP-Anomalie","T850-Anomalie"]
+    if model=="GEFS Mittel":parameters.append("Akkumulierter Niederschlag")
     if model=="ECMWF IFS":parameters+=["T2","Schneehöhe"]
     parameter=forced_parameter if forced_parameter in parameters else st.radio("Parameter",parameters,horizontal=True,key="global_parameter_"+model)
+    if parameter=="Akkumulierter Niederschlag":
+        st.caption("Akkumulierter Niederschlag seit Modellstart (mm) aus dem NOAA-Ensemblemittel; GRIB-Akkumulationsintervalle werden geprüft.")
     if parameter=="Schneehöhe":
         st.caption("ECMWF-Schneehöhe in cm, berechnet aus Schneewasseräquivalent (sd) und prognostizierter Schneedichte (rsn).")
     if parameter=="MSLP-Anomalie":
@@ -336,8 +339,12 @@ def show(region, forced_model=None, forced_parameter=None):
         try:
             with st.spinner(f"{model} direkt herunterladen und berechnen …"):
                 valid=run+timedelta(hours=lead)
-                variable=PARAMS["MSLP" if parameter=="MSLP-Anomalie" else ("T850" if parameter=="T850-Anomalie" else parameter)]
-                X,Y,Z=get_field(model,run,lead,variable,REGIONS[region])
+                variable=(None if parameter=="Akkumulierter Niederschlag" else PARAMS["MSLP" if parameter=="MSLP-Anomalie" else ("T850" if parameter=="T850-Anomalie" else parameter)])
+                if parameter=="Akkumulierter Niederschlag":
+                    from ensemble_precip import accumulated_mean
+                    X,Y,Z=accumulated_mean(model,run,lead,region)
+                else:
+                    X,Y,Z=get_field(model,run,lead,variable,REGIONS[region])
                 if parameter in ("Z500 + MSLP","T850 + MSLP","T850-Anomalie"):
                     _,_,mslp=get_field(model,run,lead,"msl",REGIONS[region])
                 else:mslp=None
