@@ -251,6 +251,12 @@ def load_grid(url, valid, bounds, variable):
                     if not mask.any():
                         raise RuntimeError("ICON-EU-Feld deckt die gewählte Region nicht ab.")
                     lat,lon,vals=lat[mask],lon[mask],vals[mask]
+                    if variable=="h_snow":
+                        # Missing GRIB values must not enter interpolation or become 0 cm.
+                        good=np.isfinite(vals)&(np.abs(vals)<9000)
+                        if good.sum()<20:
+                            raise RuntimeError("Zu wenige gültige ICON-Schneehöhenpunkte.")
+                        lat,lon,vals=lat[good],lon[good],vals[good]
                     if variable=="fi":
                         units=str(codes_get(gid,"units")).lower().replace(" ","")
                         if "m2" in units or "m**2" in units or "m^2" in units: vals=vals/9.80665/10
@@ -293,6 +299,7 @@ def load_grid(url, valid, bounds, variable):
                             inside=hull.find_simplex(np.column_stack((X.ravel(),Y.ravel())))>=0
                             Z=np.where(inside.reshape(X.shape),Z,np.nan)
                         # Linear interpolation already leaves NaN outside hull.
+                        # Keep genuine out-of-domain pixels masked; never fake snow-free land.
                     elif not np.isfinite(Z).all():
                         nearest=griddata(np.column_stack((lon,lat)),vals,(X,Y),method="nearest")
                         Z=np.where(np.isfinite(Z),Z,nearest)
