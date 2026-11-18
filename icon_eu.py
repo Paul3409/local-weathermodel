@@ -470,10 +470,11 @@ def windchill_celsius(temp_c, u_ms, v_ms):
 SNOW_DEPTH_EDGES=[0,.5,1,1.5,2,2.5,3,4,5,6,8,10,12,15,20,25,30,40,50,60,75,100,125,150,200,10000]
 SNOW_DEPTH_COLORS=[
     "#398B46","#D6F3FF","#BCE9FF","#A4DFFC","#8DD4F5",
-    "#76C8EF","#B5E9FC","#9EDFF8","#8DD7F5","#75CAEF",
-    "#60BFE8","#4EA9DC","#398FD3","#2C7BC5","#2664B7",
+    "#76C8EF","#68BEE9","#5AB3E3","#4DA9DC","#449ED6",
+    "#398FD3","#3184CC","#2C7BC5","#2870BD","#2664B7",
     "#2E58AA","#354A9D","#4B49A5","#634AAB","#7E5AAF",
     "#9B70BC","#B48CC8","#C9A4D3","#DBB7DB","#E8D4EC"]
+
 SNOW_STOPS=[(0.1,"#1BC33A"),(0.5,"#D8F6FC"),(1,"#A5E8F8"),(2,"#6DCEEF"),(5,"#339EDB"),(10,"#1765B9"),(20,"#5949BA"),(30,"#9853C8"),(50,"#D95AB6"),(75,"#EF779A"),(100,"#F7C7DF"),(150,"#FFFFFF")]
 def snow_water_mask(X,Y):
     """Rasterize actual land polygons; ocean and lakes outside polygons remain blue."""
