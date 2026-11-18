@@ -24,9 +24,9 @@ CAPABILITIES = {
     },
     "GFS": {
         "Deutschland": SYNOPTIC + ["2-m-Temperatur", "Taupunkt", "Windböen",
-            "Neuschneemenge", "Schneehöhe", "Windchill", "Schneefallgrenze (Schätzung)"],
-        "Mitteleuropa": SYNOPTIC + ["Neuschneemenge", "Schneehöhe", "Windchill"],
-        "Europa & Nordatlantik": SYNOPTIC + ["Neuschneemenge", "Schneehöhe", "Windchill"],
+            "Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill", "Schneefallgrenze (Schätzung)"],
+        "Mitteleuropa": SYNOPTIC + ["Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill"],
+        "Europa & Nordatlantik": SYNOPTIC + ["Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill"],
     },
     "ECMWF IFS": {region: SYNOPTIC + ["MSLP-Anomalie", "T2", "Schneehöhe"] for region in ALL_REGIONS},
     "GEFS Mittel": {region: SYNOPTIC + ["MSLP-Anomalie"] for region in ALL_REGIONS},
