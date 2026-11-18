@@ -23,17 +23,17 @@ CAPABILITIES = {
         "Europa & Nordatlantik": SYNOPTIC + ["Neuschneemenge", "Schneehöhe", "Windchill"],
     },
     "GFS": {
-        "Deutschland": SYNOPTIC + ["2-m-Temperatur", "Taupunkt", "Windböen",
+        "Deutschland": SYNOPTIC + ["MSLP-Anomalie","T850-Anomalie"] + ["2-m-Temperatur", "Taupunkt", "Windböen",
             "Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill", "Schneefallgrenze (Schätzung)"],
-        "Mitteleuropa": SYNOPTIC + ["Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill"],
-        "Europa & Nordatlantik": SYNOPTIC + ["Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill"],
+        "Mitteleuropa": SYNOPTIC + ["MSLP-Anomalie","T850-Anomalie","Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill"],
+        "Europa & Nordatlantik": SYNOPTIC + ["MSLP-Anomalie","T850-Anomalie","Akkumulierter Niederschlag", "Neuschneemenge", "Schneehöhe", "Windchill"],
     },
     "ECMWF IFS": {region: SYNOPTIC + ["MSLP-Anomalie", "T2", "Schneehöhe"] for region in ALL_REGIONS},
-    "GEFS Mittel": {region: SYNOPTIC + ["MSLP-Anomalie"] for region in ALL_REGIONS},
+    "GEFS Mittel": {region: SYNOPTIC + ["MSLP-Anomalie","T850-Anomalie"] for region in ALL_REGIONS},
     "AIGFS": {region: ["MSLP", "T850", "T850 + MSLP", "T2",
-                            "Z500 + MSLP", "MSLP-Anomalie", "Niederschlagssumme"]
+                            "Z500 + MSLP", "MSLP-Anomalie", "T850-Anomalie", "Niederschlagssumme"]
               for region in ALL_REGIONS},
-    "AIGEFS Mittel": {region: ["MSLP", "T850", "T2"] for region in ALL_REGIONS},
+    "AIGEFS Mittel": {region: ["MSLP", "T850", "T850 + MSLP", "Z500 + MSLP", "MSLP-Anomalie", "T850-Anomalie", "T2"] for region in ALL_REGIONS},
 }
 
 def dropdown(title, key, options):
@@ -94,7 +94,7 @@ def show_model_maps():
             st.caption(note)
 
 def show():
-    st.caption("MeteoOst V2 · zentrale Navigation")
+    st.caption("MeteoOST V2 | v2.0.0 · zentrale Navigation")
     section=dropdown("Bereich", "v2_section",
                      ["Modelle", "Modellvergleich", "Ensembles", "Radar"])
     if section=="Modelle":
