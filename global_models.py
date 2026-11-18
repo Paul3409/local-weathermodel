@@ -224,7 +224,7 @@ def climatology_on_grid(X,Y,month):
         raise RuntimeError("Klimatologie deckt das Kartengebiet nicht vollständig ab.")
     return result
 
-def anomaly_map(X,Y,pressure,reference,region,model,run,valid,parameter="MSLP-Anomalie"):
+def anomaly_map(X,Y,pressure,reference,region,model,run,valid,parameter="MSLP-Anomalie",mslp=None):
     import matplotlib.pyplot as plt
     from matplotlib.colors import TwoSlopeNorm
     from map_design import frame_png, style_figure
@@ -272,8 +272,15 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid,parameter="MSLP-An
         norm=TwoSlopeNorm(vcenter=0,vmin=-limit,vmax=limit),
         extend="both",
     )
-    if parameter=="MSLP-Anomalie":
-        lines=ax.contour(X,Y,pressure,levels=np.arange(940,1081,4),colors="#1b2735",linewidths=.6)
+    if parameter in ("MSLP-Anomalie","T850-Anomalie"):
+        # MSLP anomaly already contains absolute sea-level pressure; T850 needs
+        # a separately fetched MSLP field for its isobars.
+        isobar_field=pressure if parameter=="MSLP-Anomalie" else mslp
+        if isobar_field is None:
+            raise ValueError("MSLP-Daten für T850-Anomalie-Isobaren fehlen.")
+        if np.shape(isobar_field)!=np.shape(X):
+            raise ValueError("MSLP-Gitter passt nicht zum T850-Gitter.")
+        lines=ax.contour(X,Y,isobar_field,levels=np.arange(940,1081,4),colors="#1b2735",linewidths=.6)
         ax.clabel(lines,inline=True,fontsize=6,fmt="%d")
     from icon_eu import borders, COUNTRIES
     try:
@@ -330,12 +337,12 @@ def show(region, forced_model=None, forced_parameter=None):
                 valid=run+timedelta(hours=lead)
                 variable=PARAMS["MSLP" if parameter=="MSLP-Anomalie" else ("T850" if parameter=="T850-Anomalie" else parameter)]
                 X,Y,Z=get_field(model,run,lead,variable,REGIONS[region])
-                if parameter in ("Z500 + MSLP","T850 + MSLP"):
+                if parameter in ("Z500 + MSLP","T850 + MSLP","T850-Anomalie"):
                     _,_,mslp=get_field(model,run,lead,"msl",REGIONS[region])
                 else:mslp=None
                 if parameter in ("MSLP-Anomalie","T850-Anomalie"):
                     baseline=(climatology_on_grid(X,Y,valid.month) if parameter=="MSLP-Anomalie" else t850_climatology_on_grid(X,Y,valid.month))
-                    png=anomaly_map(X,Y,Z,baseline,region,model,run,valid,parameter=parameter)
+                    png=anomaly_map(X,Y,Z,baseline,region,model,run,valid,parameter=parameter,mslp=mslp)
                 else:png=render(X,Y,Z,region,"2-m-Temperatur" if parameter=="T2" else parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["global_map"]=(model,region,run,lead,parameter,valid,png)
 
