@@ -217,60 +217,74 @@ def calculate(model,run,region,parameter,hours,progress=None):
     jobs=[(m,t) for m in members for t in timeline if t>0]
     if len(jobs)>3500:raise RuntimeError("Datenmenge für eine Einzelberechnung zu groß.")
     grids={}
+    failed={}
     with ThreadPoolExecutor(max_workers=6) as pool:
         futures={pool.submit(_member_step,model,run,t,m,variable,level,region,member_urls):(m,t)
                  for m,t in jobs}
         for i,future in enumerate(as_completed(futures),1):
             m,t=futures[future]
             try:grids[m,t]=future.result()
-            except Exception as exc:
-                for pending in futures:pending.cancel()
-                raise RuntimeError(f"Mitglied {m}, +{t} h nicht vollständig: {exc}") from exc
+            except Exception:failed.setdefault(m,[]).append(t)
             if progress:progress.progress(i/len(jobs),text=f"Ensemblefelder {i}/{len(jobs)}")
-    X,Y=next(iter(grids.values()))[:2]
+    # An incomplete temporal series invalidates the whole member.
+    good=[]
     fields=[]
+    X=Y=None
+    expected_steps=[t for t in timeline if t>0]
     for m in members:
-        series=np.stack([grids[m,t][2] for t in timeline if t>0])
-        if kind=="temp":
-            field=np.nanmax(series,axis=0) if parameter.startswith("Tmax") else np.nanmin(series,axis=0)
-        elif kind=="snow":
-            # WEASD is snow-water equivalent on the ground, not 24h
-            # snowfall. A positive change is not an unambiguous snowfall
-            # event. Refuse to publish this as snowfall risk.
-            raise RuntimeError("Schneefallrisiko benötigt echte 24-h-Schneefallakkumulationen (nicht WEASD).")
-        else:
-            intervals=[grids[m,t][3] for t in timeline if t>0]
-            # GEFS commonly publishes overlapping 3h/6h accumulations.
-            # Choose an exact, contiguous partition of [0, hours], and
-            # never count the same precipitation twice.
-            by_end={}
-            for idx,(start,end) in enumerate(intervals):
-                if end not in by_end or start>intervals[by_end[end]][0]:
-                    by_end[end]=idx
-            chosen=[]
-            cursor=hours
-            while cursor>0:
-                if cursor not in by_end:
-                    raise RuntimeError(f"APCP-Abdeckung fehlt vor +{cursor} h.")
-                idx=by_end[cursor]
-                start,end=intervals[idx]
-                if start>=cursor:
-                    raise RuntimeError("Ungültige APCP-Intervallfolge.")
-                chosen.append(idx)
-                cursor=start
-            field=np.sum(series[chosen],axis=0)
+        if m in failed or any((m,t) not in grids for t in expected_steps):
+            failed.setdefault(m,[])
+            continue
+        series=np.stack([grids[m,t][2] for t in expected_steps])
+        if not np.isfinite(series).all():
+            failed.setdefault(m,[])
+            continue
+        try:
+            if kind=="temp":
+                field=np.max(series,axis=0) if parameter.startswith("Tmax") else np.min(series,axis=0)
+            elif kind=="snow":
+                raise RuntimeError("Schneefallrisiko benötigt echte 24-h-Schneefallakkumulationen.")
+            else:
+                intervals=[grids[m,t][3] for t in expected_steps]
+                by_end={}
+                for idx,(start,end) in enumerate(intervals):
+                    if end not in by_end or start>intervals[by_end[end]][0]:
+                        by_end[end]=idx
+                chosen=[]
+                cursor=hours
+                while cursor>0:
+                    if cursor not in by_end:raise ValueError("APCP-Lücke")
+                    idx=by_end[cursor]
+                    start,end=intervals[idx]
+                    if start>=cursor:raise ValueError("APCP-Intervallfehler")
+                    chosen.append(idx)
+                    cursor=start
+                field=np.sum(series[chosen],axis=0)
+            if not np.isfinite(field).all():
+                failed.setdefault(m,[])
+                continue
+        except ValueError:
+            failed.setdefault(m,[])
+            continue
+        if X is None:X,Y=grids[m,expected_steps[0]][:2]
+        good.append(m)
         fields.append(field)
+    total=len(members)
+    required=max(10,int(np.ceil(.7*total)))
+    if len(good)<required:
+        raise RuntimeError(
+            f"Zu wenige vollständige Ensemblemitglieder: {len(good)}/{total} "
+            f"(mindestens {required} erforderlich). Keine verlässliche Karte möglich.")
     threshold=dict(CATEGORIES["Temperatur"] if kind=="temp" else CATEGORIES["Niederschlag"])[parameter]
     op="<" if "<" in parameter else ">"
-    # Reject cells with missing members or steps instead of using nanmax
-    data=np.stack(fields)
-    if not np.isfinite(data).all():
-        raise RuntimeError("Unvollständige Datenabdeckung im Kartenbereich.")
-    result,count=probability(data,threshold,op,min_members=len(members))
-    return X,Y,result,len(members)
+    result,count=probability(np.stack(fields),threshold,op,min_members=len(good))
+    quality={"available":len(good),"total":total,
+             "missing":sorted(set(members)-set(good)),
+             "missing_steps":{m:sorted(set(failed.get(m,[]))) for m in members if m not in good}}
+    return X,Y,result,quality
 
 
-def render(X,Y,Z,model,region,parameter,run,hours,members):
+def render(X,Y,Z,model,region,parameter,run,hours,quality):
     fig,ax=plt.subplots(figsize=(9,11) if region=="Deutschland" else (12,8.5),dpi=120)
     fig.patch.set_facecolor("#071B30")
     ax.set_facecolor("#071B30")
@@ -301,8 +315,35 @@ def render(X,Y,Z,model,region,parameter,run,hours,members):
     fig.savefig(out,format="png",bbox_inches="tight",facecolor=fig.get_facecolor())
     plt.close(fig)
     valid=run+timedelta(hours=hours)
-    return frame_png(out.getvalue(),f"{parameter} · {hours} h · {members} Mitglieder",
-                     model,region,run,valid)
+    png=frame_png(out.getvalue(),f"{parameter} · {hours} h",model,region,run,valid)
+    # Quality notice is embedded in the downloadable PNG.
+    from PIL import Image, ImageDraw, ImageFont
+    image=Image.open(io.BytesIO(png)).convert("RGB")
+    d=ImageDraw.Draw(image)
+    n,total=quality["available"],quality["total"]
+    missing=quality["missing"]
+    if missing:
+        heading="EINGESCHRAENKTE AUSSAGEKRAFT"
+        details=f"{n}/{total} vollstaendige Mitglieder | Fehlend: "+", ".join(map(str,missing))
+        guidance="Nur Anteil der vorhandenen Mitglieder; fehlende Mitglieder koennen das Ergebnis verzerren."
+        bg="#6A3440"
+    else:
+        heading="VOLLSTAENDIGES ENSEMBLE"
+        details=f"{n}/{total} vollstaendige Mitglieder"
+        guidance="Ensemble-Anteil, keine kalibrierte Eintrittswahrscheinlichkeit."
+        bg="#163B53"
+    try:
+        font=ImageFont.truetype("DejaVuSans.ttf",18)
+        small=ImageFont.truetype("DejaVuSans.ttf",15)
+    except OSError:
+        font=ImageFont.load_default();small=font
+    w,h=image.size
+    y=h-116
+    d.rounded_rectangle((18,y,w-18,h-51),radius=9,fill=bg,outline="#9BC4D4",width=2)
+    d.text((33,y+5),heading+" | "+details,font=font,fill="#FFFFFF")
+    d.text((33,y+34),guidance,font=small,fill="#FFFFFF")
+    result=io.BytesIO();image.save(result,format="PNG")
+    return result.getvalue()
 
 
 def show():
@@ -325,8 +366,8 @@ def show():
     runs=recent_cycles("GEFS" if model=="GEFS" else "AIGEFS Mittel")
     run=st.selectbox("Modelllauf (UTC)",runs,format_func=lambda r:r.strftime("%d.%m.%Y %H UTC"),
                      key="prob_run_"+model)
-    st.caption(f"Zeitraum: +0 bis +{hours} h. Berechnung aus Einzelmitgliedern; "
-               "fehlende Felder führen zu einer Fehlermeldung.")
+    st.caption(f"Zeitraum: +0 bis +{hours} h. Unvollständige Mitglieder werden ausgeschlossen; "
+               "Karte erst ab 70 % vollständigen Mitgliedern (mindestens 10).")
     st.checkbox("🔢 Zahlengitter auf Wahrscheinlichkeitskarte",key="v2_value_grid")
     if st.button("🎯 Wahrscheinlichkeitskarte berechnen",type="primary",use_container_width=True):
         if category=="Schnee":
@@ -335,8 +376,10 @@ def show():
             return
         bar=st.progress(0)
         try:
-            X,Y,Z,n=calculate(model,run,region,parameter,hours,bar)
-            png=render(X,Y,Z,model,region,parameter,run,hours,n)
+            X,Y,Z,quality=calculate(model,run,region,parameter,hours,bar)
+            png=render(X,Y,Z,model,region,parameter,run,hours,quality)
+            if quality["missing"]:
+                st.warning("Eingeschränkte Aussagekraft: {}/{} vollständige Mitglieder. Fehlend: {}. Hinweis auch im PNG.".format(quality["available"],quality["total"],quality["missing"]))
             st.session_state["prob_map"]=(model,region,parameter,hours,run,png)
         except Exception as exc:
             st.error(f"Berechnung nicht möglich: {type(exc).__name__}: {exc}")
