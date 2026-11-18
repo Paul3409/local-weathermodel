@@ -93,7 +93,8 @@ def show(region,forced_model=None,forced_parameter=None):
                 valid=run+timedelta(hours=lead)
                 if parameter in ("MSLP-Anomalie","T850-Anomalie"):
                     baseline=(climatology_on_grid(X,Y,valid.month) if parameter=="MSLP-Anomalie" else t850_climatology_on_grid(X,Y,valid.month))
-                    png=anomaly_map(X,Y,Z,baseline,region,model,run,valid,parameter=parameter)
+                    mslp=field(model,run,lead,"MSLP",region)[2] if parameter=="T850-Anomalie" else None
+                    png=anomaly_map(X,Y,Z,baseline,region,model,run,valid,parameter=parameter,mslp=mslp)
                 else:
                     pressure=field(model,run,lead,"MSLP",region)[2] if parameter in ("T850 + MSLP","Z500 + MSLP") else None
                     name="2-m-Temperatur" if parameter=="T2" else parameter
