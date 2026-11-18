@@ -24,7 +24,7 @@ COUNTRIES = "https://raw.githubusercontent.com/datasets/geo-countries/master/dat
 STATES = "https://raw.githubusercontent.com/isellsoap/deutschlandGeoJSON/main/2_bundeslaender/3_mittel.geo.json"
 REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Mitteleuropa": (2.0, 27.0, 44.0, 58.0), "Europa & Nordatlantik": (-65.0, 65.0, 32.0, 72.0)}
 HEADERS = {"User-Agent": "MeteoOst weather visualization (educational)"}
-MAP_STYLE_VERSION = "meteoost-brand-v1"
+MAP_STYLE_VERSION = "meteoost-v2-0-0"
 LOCAL_TZ=ZoneInfo("Europe/Berlin")
 EU_LEADS=list(range(79))+list(range(81,121,3))
 def previous_eu_lead(lead):
@@ -741,7 +741,7 @@ def show(region, forced_model=None, forced_parameter=None):
     st.caption("ICON-D2: Deutschland bis +48 h stündlich (sofern die DWD-Dateien verfügbar sind). ICON-EU: bis +78 h stündlich, danach bis +120 h alle 3 Stunden. GFS: 0,25°-Gitter, +0 bis +384 h in 3-Stunden-Schritten; nur die hier unterstützten Felder. Grenzen bleiben erhalten.")
     st.caption("Signifikantes Wetter: originale DWD-WW-Codes, räumlich nur nächster Modellgitterpunkt. Nebel mit Reifbildung wird als Nebel gezeigt; Gewitter in der Nähe nicht als eigene Klasse.")
     choices=(["MSLP","T850","T850 + MSLP","Z500 + MSLP"] + (list(SURFACE_FIELDS) if region=="Deutschland" else [])) if model in ("ICON-EU","ICON-D2") else (["MSLP","T850","T850 + MSLP","Z500 + MSLP","2-m-Temperatur","Taupunkt","Windböen"] if region=="Deutschland" else ["MSLP","T850","T850 + MSLP","Z500 + MSLP"])
-    if model=="GFS": choices.append("Akkumulierter Niederschlag")
+    if model=="GFS": choices += ["Akkumulierter Niederschlag","MSLP-Anomalie","T850-Anomalie"]
     choices += ["Neuschneemenge","Schneehöhe"]
     if "Windchill" not in choices: choices.append("Windchill")
     parameter=forced_parameter if forced_parameter in choices else st.radio("Parameter",choices,horizontal=True,key="eu_parameter_"+model)
@@ -774,7 +774,7 @@ def show(region, forced_model=None, forced_parameter=None):
                 selected=None
                 for run in runs:
                     try:
-                        available=(discover_d2(run,variable) if model=="ICON-D2" else discover(run,variable)) if model!="GFS" else discover_gfs(run,parameter,REGIONS[region])
+                        available=(discover_d2(run,variable) if model=="ICON-D2" else discover(run,variable)) if model!="GFS" else discover_gfs(run,("MSLP" if parameter=="MSLP-Anomalie" else "T850" if parameter=="T850-Anomalie" else parameter),REGIONS[region])
                     except requests.RequestException:
                         continue
                     previous_lead=previous_eu_lead(lead)
@@ -805,7 +805,7 @@ def show(region, forced_model=None, forced_parameter=None):
                                 if parameter=="Akkumulierter Niederschlag" and lead==0:
                                     load_gfs(discover_gfs(run,"MSLP",REGIONS[region])[0],run,REGIONS[region],"MSLP")
                                 else:
-                                    load_gfs(available[lead],run+timedelta(hours=lead),REGIONS[region],parameter)
+                                    load_gfs(available[lead],run+timedelta(hours=lead),REGIONS[region],("MSLP" if parameter=="MSLP-Anomalie" else "T850" if parameter=="T850-Anomalie" else parameter))
                             except (requests.RequestException,RuntimeError,ValueError,OSError) as exc:
                                 st.write(f"GFS-Lauf {run:%d.%m. %H} UTC nicht verfügbar: {type(exc).__name__}")
                                 continue
@@ -818,7 +818,7 @@ def show(region, forced_model=None, forced_parameter=None):
                 if model=="GFS" and parameter=="Akkumulierter Niederschlag":
                     X,Y,Z=gfs_accumulated_precipitation(run,lead,REGIONS[region])
                 else:
-                    X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model!="GFS" else load_gfs(url,valid,REGIONS[region],parameter)
+                    X,Y,Z=load_grid(url,valid,REGIONS[region],variable) if model!="GFS" else load_gfs(url,valid,REGIONS[region],("MSLP" if parameter=="MSLP-Anomalie" else "T850" if parameter=="T850-Anomalie" else parameter))
                 if parameter=="Windchill":
                     if model=="GFS":
                         u_url=discover_gfs(run,"Windchill-U",REGIONS[region])[lead]
@@ -859,7 +859,12 @@ def show(region, forced_model=None, forced_parameter=None):
                     else:
                         pressure_urls=discover_gfs(run,"MSLP",REGIONS[region])
                         _,_,mslp=load_gfs(pressure_urls[lead],valid,REGIONS[region],"MSLP")
-                png=render(X,Y,Z,region,parameter,run,valid,model=model,mslp=mslp)
+                if model=="GFS" and parameter in ("MSLP-Anomalie","T850-Anomalie"):
+                    from global_models import climatology_on_grid, t850_climatology_on_grid, anomaly_map
+                    reference=(climatology_on_grid(X,Y,valid.month) if parameter=="MSLP-Anomalie" else t850_climatology_on_grid(X,Y,valid.month))
+                    png=anomaly_map(X,Y,Z,reference,region,model,run,valid,parameter=parameter)
+                else:
+                    png=render(X,Y,Z,region,parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["eu_map"]=(MAP_STYLE_VERSION,model,region,parameter,lead,valid,png)
                 st.session_state.setdefault("eu_batch_maps",{})[(MAP_STYLE_VERSION,model,region,parameter,run,lead)]=(valid,png)
                 st.caption(f"Verwendeter Modelllauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
