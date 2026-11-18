@@ -402,7 +402,7 @@ def render_png(X, Y, Z, run, valid, mode="ICON-D2 interpoliert", correction=None
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white', alpha=.25, linewidth=.5)
-    fig.suptitle(('KRUMET | ' if model_name=='KRUMET' else 'MeteoOst | ')+('2-m-Taupunkt' if 'Taupunkt' in mode else '2-m-Temperatur'), fontsize=16, weight='bold', y=.98)
+    fig.suptitle(('KRUMET | ' if model_name=='KRUMET' else 'MeteoOST V2 | ')+('2-m-Taupunkt' if 'Taupunkt' in mode else '2-m-Temperatur'), fontsize=16, weight='bold', y=.98)
     ax.set_title(f'{mode}  ·  Lauf: {run:%d.%m.%Y %H:%M} UTC  ·  Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M} MEZ/MESZ', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_ticks([-20,-15,-10,-5,0,.5,5,10,15,20])
@@ -439,7 +439,7 @@ def render_difference(X, Y, difference, run, valid, model_name='ICON-D2'):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white', alpha=.25, linewidth=.5)
-    fig.suptitle(('KRUMET' if model_name=='KRUMET' else 'MeteoOst-T2M')+' | Differenzkarte', fontsize=16, weight='bold', y=.98)
+    fig.suptitle(('KRUMET' if model_name=='KRUMET' else 'MeteoOST V2')+' | Differenzkarte', fontsize=16, weight='bold', y=.98)
     ax.set_title(f'Lokales Experiment minus ICON-D2 · Lauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M}', fontsize=8, pad=12)
     cb = fig.colorbar(filled, ax=ax, orientation='horizontal', fraction=.055, pad=.09)
     cb.set_label('Temperaturabweichung (°C)')
@@ -480,7 +480,7 @@ def render_gust(X,Y,Z,run,valid,show_km_values=False):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white',alpha=.25,linewidth=.5)
-    fig.suptitle('MeteoOst  |  Windböen',fontsize=16,weight='bold',y=.98)
+    fig.suptitle('MeteoOST V2  |  Windböen',fontsize=16,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 Windböen · Lauf: {run:%d.%m.%Y %H:%M} UTC · Gültig: {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=8,pad=12)
     cb=fig.colorbar(filled,ax=ax,orientation='horizontal',fraction=.055,pad=.09)
     cb.set_ticks(np.arange(0,121,10))
@@ -605,7 +605,7 @@ def render_fog(X,Y,Z,run,valid):
     ax.set_xlabel('Längengrad (°O)')
     ax.set_ylabel('Breitengrad (°N)')
     ax.grid(color='white',alpha=.2,linewidth=.5)
-    fig.suptitle('MeteoOst | Nebelpotenzial (experimentell)',fontsize=14,weight='bold',y=.98)
+    fig.suptitle('MeteoOST V2 | Nebelpotenzial (experimentell)',fontsize=14,weight='bold',y=.98)
     ax.set_title(f'ICON-D2 · {valid.astimezone(TZ):%d.%m.%Y %H:%M %Z}',fontsize=9)
     fig.text(.5,.025,'Heuristik: Feuchte/Wind/optional tiefe Wolken · Regen separat · keine Nebelwahrscheinlichkeit',ha='center',fontsize=8)
     style_figure(fig, ax)
@@ -1024,7 +1024,7 @@ if image_key in st.session_state:
     png = selected_map if variant == 'Differenz zu ICON-D2' else selected_map[int(show_km_values)]
     st.image(png, width='stretch')
     st.download_button('PNG herunterladen', data=png,
-                       file_name=f'MeteoOst_{image_key}_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
+                       file_name=f'MeteoOST_V2_{image_key}_{list(variants).index(variant)}_{valid:%Y%m%d_%H%M}_UTC.png', mime='image/png')
 
 
 if krumet_mode and st.session_state.get('krumet_station_samples'):
