@@ -683,7 +683,7 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         # Grouped WW legend is drawn in the navy outer frame.
         fig.subplots_adjust(left=.095,right=.985,top=.975,bottom=.095)
     else:
-        cb=fig.colorbar(im,ax=ax,orientation="vertical" if region!="Deutschland" else "horizontal",pad=.035 if region!="Deutschland" else .08,fraction=.045 if region!="Deutschland" else .05)
+        cb=fig.colorbar(im,ax=ax,orientation="vertical",pad=.035,fraction=.045)
     if parameter=="Signifikantes Wetter":
         pass
     elif parameter in ("Neuschneemenge","Schneehöhe"):
@@ -705,30 +705,20 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     if parameter!="Signifikantes Wetter":
         cb.set_label(label)
     style_figure(fig, ax)
-    if region=="Deutschland":
-        # Dedicated 3:4 detail card: make the actual map occupy nearly the
-        # entire plot width; reserve a compact strip for the color scale.
-        # This fixes the excessive empty space that cropping the PNG cannot.
-        if parameter=="Signifikantes Wetter":
-            ax.set_position([.095,.085,.875,.89])
-        else:
-            ax.set_position([.095,.18,.875,.795])
-            cb.ax.set_position([.14,.085,.78,.028])
-    if region!="Deutschland":
-        # Fill the card vertically, leaving a narrow, dedicated strip for
-        # a right-hand temperature/parameter scale. Never stretch geography.
-        fig.set_size_inches(15.2,7.8) if region=="Europa & Nordatlantik" else fig.set_size_inches(13.2,8.8)
-        ax.set_aspect("auto")
-        if parameter=="Signifikantes Wetter":
-            ax.set_position([.07,.08,.89,.88])
-        else:
-            ax.set_position([.07,.09,.79,.87])
-            cb.ax.set_position([.885,.13,.028,.79])
-            cb.ax.yaxis.set_ticks_position("right")
-            cb.ax.yaxis.set_label_position("right")
-            cb.ax.tick_params(axis="y",labelsize=10,labelrotation=0,pad=5)
-            # Keep tick numbers horizontal for easy reading, from top to bottom.
-            cb.set_label(label,rotation=270,labelpad=22)
+    # Uniform 4:3 landscape output for Germany, Central Europe and Atlantic.
+    # Germany keeps its exact geographic extent, while the plot uses the
+    # same generous map footprint and vertical colorbar as Central Europe.
+    fig.set_size_inches(15.2,7.8) if region=="Europa & Nordatlantik" else fig.set_size_inches(13.2,8.8)
+    ax.set_aspect("auto")
+    if parameter=="Signifikantes Wetter":
+        ax.set_position([.07,.08,.89,.88])
+    else:
+        ax.set_position([.07,.09,.79,.87])
+        cb.ax.set_position([.885,.13,.028,.79])
+        cb.ax.yaxis.set_ticks_position("right")
+        cb.ax.yaxis.set_label_position("right")
+        cb.ax.tick_params(axis="y",labelsize=10,labelrotation=0,pad=5)
+        cb.set_label(label,rotation=270,labelpad=22)
     from value_grid import draw as draw_value_grid
     draw_value_grid(ax,X,Y,Z,region,parameter)
     output=io.BytesIO()
