@@ -174,7 +174,13 @@ def plot_geometry(ax,geom,linewidth):
         for ring in polygon:
             if len(ring)>1:
                 arr=np.asarray(ring,dtype=float)
-                ax.plot(arr[:,0],arr[:,1],color="#253449",linewidth=linewidth,alpha=.75,zorder=4)
+                if getattr(ax,"_meteoost_emphasize_precip_borders",False):
+                    # Light halo keeps country outlines legible on dark blue/red
+                    # as well as light yellow/white precipitation backgrounds.
+                    ax.plot(arr[:,0],arr[:,1],color="#F5F7FA",linewidth=linewidth+1.5,alpha=.95,zorder=8)
+                    ax.plot(arr[:,0],arr[:,1],color="#17253A",linewidth=linewidth+.65,alpha=.98,zorder=9)
+                else:
+                    ax.plot(arr[:,0],arr[:,1],color="#253449",linewidth=linewidth,alpha=.75,zorder=4)
 
 def load_grid(url, valid, bounds, variable):
     response=requests.get(url,headers=HEADERS,timeout=90)
@@ -652,10 +658,12 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
         if contours:
             lines=ax.contour(X,Y,Z,levels=contours,colors="#24364b",linewidths=.45,alpha=.7)
             ax.clabel(lines,inline=True,fontsize=6,fmt="%g")
+    # Only the accumulated-precipitation map gets high-contrast borders.
+    ax._meteoost_emphasize_precip_borders = (parameter=="Akkumulierter Niederschlag")
     try:
         data=borders(COUNTRIES)
         for feature in data.get("features",[]):
-            plot_geometry(ax,feature.get("geometry"),.55)
+            plot_geometry(ax,feature.get("geometry"),1.05 if parameter=="Akkumulierter Niederschlag" else .55)
         if region=="Deutschland":
             for feature in borders(STATES).get("features",[]):
                 plot_geometry(ax,feature.get("geometry"),.35)
