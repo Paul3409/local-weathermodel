@@ -137,6 +137,56 @@ def monthly_pressure_climatology(month):
             failures.append(f"{type(exc).__name__}: {exc}")
     raise RuntimeError("NOAA-Klimatologie nicht erreichbar: "+"; ".join(failures))
 
+@st.cache_data(ttl=7*86400,show_spinner=False)
+def monthly_t850_climatology(month):
+    """1991-2020 monthly 850-hPa temperature normal from NOAA PSL, in Celsius."""
+    import h5py
+    urls=[
+        "https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc",
+        "https://psl.noaa.gov/thredds/fileServer/Datasets/ncep.reanalysis.derived/pressure/air.mon.ltm.1991-2020.nc",
+    ]
+    errors=[]
+    for url in urls:
+        try:
+            response=requests.get(url,headers=HEADERS,timeout=60)
+            response.raise_for_status()
+            with h5py.File(io.BytesIO(response.content),"r") as nc:
+                lat=np.asarray(nc["lat"][:],dtype=float)
+                lon=np.asarray(nc["lon"][:],dtype=float)
+                levels=np.asarray(nc["level"][:],dtype=float)
+                level_idx=int(np.argmin(np.abs(levels-850)))
+                if abs(levels[level_idx]-850)>1:raise ValueError("850-hPa-Niveau fehlt.")
+                variable=nc["air"]
+                values=np.asarray(variable[month-1,level_idx],dtype=float)
+                scale=float(np.asarray(variable.attrs.get("scale_factor",1)).reshape(-1)[0])
+                offset=float(np.asarray(variable.attrs.get("add_offset",0)).reshape(-1)[0])
+                values=values*scale+offset
+            if values.shape!=(len(lat),len(lon)) or not np.isfinite(values).all():
+                raise ValueError("Ungültiges T850-Klimatologiegitter.")
+            if 150<float(np.nanmedian(values))<350:values=values-273.15
+            if not -80<float(np.nanmedian(values))<50:raise ValueError("T850-Klimatologie unplausibel.")
+            return lat,lon,values
+        except (requests.RequestException,OSError,KeyError,ValueError,IndexError) as exc:
+            errors.append(f"{type(exc).__name__}: {exc}")
+    raise RuntimeError("T850-Klimatologie nicht erreichbar: "+"; ".join(errors))
+
+def _climatology_interpolated(X,Y,lat,lon,values):
+    from scipy.interpolate import RegularGridInterpolator
+    il=np.argsort(lat);jl=np.argsort(np.mod(lon,360))
+    lon_sorted=np.mod(lon[jl],360)
+    field=values[np.ix_(il,jl)]
+    periodic_lon=np.concatenate((lon_sorted[-1:]-360,lon_sorted,lon_sorted[:1]+360))
+    periodic_field=np.concatenate((field[:,-1:],field,field[:,:1]),axis=1)
+    interpolator=RegularGridInterpolator((lat[il],periodic_lon),periodic_field,bounds_error=False,fill_value=np.nan)
+    query_lon=np.mod(X.ravel(),360)
+    query_lon=np.where(query_lon>periodic_lon[-2],query_lon-360,query_lon)
+    result=interpolator(np.column_stack((Y.ravel(),query_lon))).reshape(X.shape)
+    if not np.isfinite(result).all():raise RuntimeError("Klimatologie deckt Kartengebiet nicht vollständig ab.")
+    return result
+
+def t850_climatology_on_grid(X,Y,month):
+    return _climatology_interpolated(X,Y,*monthly_t850_climatology(month))
+
 def climatology_on_grid(X,Y,month):
     from scipy.interpolate import RegularGridInterpolator
     lat,lon,values=monthly_pressure_climatology(month)
@@ -156,7 +206,7 @@ def climatology_on_grid(X,Y,month):
         raise RuntimeError("Klimatologie deckt das Kartengebiet nicht vollständig ab.")
     return result
 
-def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
+def anomaly_map(X,Y,pressure,reference,region,model,run,valid,parameter="MSLP-Anomalie"):
     import matplotlib.pyplot as plt
     from matplotlib.colors import TwoSlopeNorm
     from map_design import frame_png, style_figure
@@ -165,10 +215,12 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
     fig.patch.set_facecolor("#061C35")
     ax.set_facecolor("#061C35")
     bounds=REGIONS[region]
-    levels=np.arange(-32,34,2)
-    im=ax.contourf(X,Y,delta,levels=levels,cmap="RdBu_r",norm=TwoSlopeNorm(vcenter=0,vmin=-32,vmax=32),extend="both")
-    lines=ax.contour(X,Y,pressure,levels=np.arange(940,1081,4),colors="#1b2735",linewidths=.6)
-    ax.clabel(lines,inline=True,fontsize=6,fmt="%d")
+    limit=12 if parameter=="T850-Anomalie" else 32
+    levels=np.linspace(-limit,limit,49 if limit==12 else 33)
+    im=ax.contourf(X,Y,delta,levels=levels,cmap="RdBu_r",norm=TwoSlopeNorm(vcenter=0,vmin=-limit,vmax=limit),extend="both")
+    if parameter=="MSLP-Anomalie":
+        lines=ax.contour(X,Y,pressure,levels=np.arange(940,1081,4),colors="#1b2735",linewidths=.6)
+        ax.clabel(lines,inline=True,fontsize=6,fmt="%d")
     from icon_eu import borders, COUNTRIES
     try:
         import matplotlib.path as mpath
@@ -185,7 +237,7 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
         st.caption("Grenzdaten momentan nicht verfügbar.")
     ax.set_xlim(bounds[0],bounds[1]);ax.set_ylim(bounds[2],bounds[3])
     ax.set_xlabel("Längengrad");ax.set_ylabel("Breitengrad")
-    colorbar=fig.colorbar(im,ax=ax,shrink=.75,label="MSLP-Anomalie (hPa)")
+    colorbar=fig.colorbar(im,ax=ax,shrink=.75,label=("T850-Anomalie (°C)" if parameter=="T850-Anomalie" else "MSLP-Anomalie (hPa)"))
     ax.set_title("")
     style_figure(fig,ax)
     colorbar.outline.set_edgecolor("#B5C8DC")
@@ -197,7 +249,7 @@ def anomaly_map(X,Y,pressure,reference,region,model,run,valid):
         ax.set_position([.055,.11,.82,.84])
         colorbar.ax.set_position([.895,.18,.023,.66])
     out=io.BytesIO();fig.savefig(out,format="png",bbox_inches="tight");plt.close(fig)
-    return frame_png(out.getvalue(),"MSLP-Anomalie",model,region,run,valid)
+    return frame_png(out.getvalue(),parameter,model,region,run,valid)
 
 def show(region, forced_model=None, forced_parameter=None):
     if forced_model is None:
@@ -211,7 +263,7 @@ def show(region, forced_model=None, forced_parameter=None):
     lead=st.select_slider("Prognosestunde",options=options,value=options[min(2,len(options)-1)],
         format_func=lambda h:f"+{h} h · {(run+timedelta(hours=h)).astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}",
         key="global_lead_"+model)
-    parameters=["MSLP","T850","T850 + MSLP","Z500 + MSLP","MSLP-Anomalie"]
+    parameters=["MSLP","T850","T850 + MSLP","Z500 + MSLP","MSLP-Anomalie","T850-Anomalie"]
     if model=="ECMWF IFS":parameters+=["T2","Schneehöhe"]
     parameter=forced_parameter if forced_parameter in parameters else st.radio("Parameter",parameters,horizontal=True,key="global_parameter_"+model)
     if parameter=="Schneehöhe":
@@ -222,14 +274,14 @@ def show(region, forced_model=None, forced_parameter=None):
         try:
             with st.spinner(f"{model} direkt herunterladen und berechnen …"):
                 valid=run+timedelta(hours=lead)
-                variable=PARAMS["MSLP" if parameter=="MSLP-Anomalie" else parameter]
+                variable=PARAMS["MSLP" if parameter=="MSLP-Anomalie" else ("T850" if parameter=="T850-Anomalie" else parameter)]
                 X,Y,Z=get_field(model,run,lead,variable,REGIONS[region])
                 if parameter in ("Z500 + MSLP","T850 + MSLP"):
                     _,_,mslp=get_field(model,run,lead,"msl",REGIONS[region])
                 else:mslp=None
-                if parameter=="MSLP-Anomalie":
-                    baseline=climatology_on_grid(X,Y,valid.month)
-                    png=anomaly_map(X,Y,Z,baseline,region,model,run,valid)
+                if parameter in ("MSLP-Anomalie","T850-Anomalie"):
+                    baseline=(climatology_on_grid(X,Y,valid.month) if parameter=="MSLP-Anomalie" else t850_climatology_on_grid(X,Y,valid.month))
+                    png=anomaly_map(X,Y,Z,baseline,region,model,run,valid,parameter=parameter)
                 else:png=render(X,Y,Z,region,"2-m-Temperatur" if parameter=="T2" else parameter,run,valid,model=model,mslp=mslp)
                 st.session_state["global_map"]=(model,region,run,lead,parameter,valid,png)
 
