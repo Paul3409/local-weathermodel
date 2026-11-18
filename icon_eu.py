@@ -460,7 +460,7 @@ def windchill_celsius(temp_c, u_ms, v_ms):
 
 # Alpine Precision: 25 discrete snow-depth classes in cm.
 # Zero and traces below 0.5 cm are green; >=0.5 cm is visibly snow-coloured.
-SNOW_DEPTH_EDGES=[0,.5,1,1.5,2,2.5,3,4,5,6,8,10,12,15,20,25,30,40,50,60,75,100,125,150,200,float("inf")]
+SNOW_DEPTH_EDGES=[0,.5,1,1.5,2,2.5,3,4,5,6,8,10,12,15,20,25,30,40,50,60,75,100,125,150,200,10000]
 SNOW_DEPTH_COLORS=[
     "#398B46","#D6F3FF","#BCE9FF","#A4DFFC","#8DD4F5",
     "#76C8EF","#B5E9FC","#9EDFF8","#8DD7F5","#75CAEF",
