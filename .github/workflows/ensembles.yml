@@ -48,38 +48,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libeccodes0 libeccodes-dev
           pip install -r requirements.txt
-      - name: Re-render GEFS 06 UTC precipitation PNG from saved cache
-        if: ${{ github.event_name == 'push' }}
-        run: |
-          python - <<'PY'
-          from datetime import datetime,timezone
-          import numpy as np
-          from ensemble_archive import _cache_file,image_path
-          from ensembles import draw,PLACES
-          model,place='GEFS','Mühlberg (Elbe)'
-          run=datetime(2026,11,17,6,tzinfo=timezone.utc)
-          steps=list(range(0,385,6))
-          arrays={}
-          for field in ('t2','precip'):
-              cache=_cache_file(model,place,field,run)
-              if not cache.exists():
-                  raise RuntimeError(f"Missing cached GEFS data: {cache}")
-              with np.load(cache,allow_pickle=False) as saved:
-                  known={int(h):j for j,h in enumerate(saved['steps'])}
-                  values=saved['data']
-                  arrays[field]=np.column_stack([
-                      values[:,known[h]] if h in known else np.full(31,np.nan)
-                      for h in steps])
-              valid=np.isfinite(arrays[field][:,1:]).mean()
-              print(f"{field} cached coverage: {valid:.1%}",flush=True)
-              if valid<0.85:
-                  raise RuntimeError(f"Insufficient cached {field} coverage")
-          target=image_path(model,place,'T2 + Niederschlag',run,384)
-          target.parent.mkdir(parents=True,exist_ok=True)
-          target.write_bytes(draw(model,place,run,'t2',steps,arrays['t2'],
-                                  precip=arrays['precip']))
-          print(f"RENDERED {target}",flush=True)
-          PY
       - name: Generate the latest available ensemble PNGs
         env:
           MODEL: ${{ github.event.inputs.model || 'GEFS' }}
@@ -98,10 +66,10 @@ jobs:
           scheduled=os.environ['EVENT_NAME'] in ('schedule','push')
           # Newest eligible GEFS cycle takes priority. Publish short-range
           # previews before the expensive +240h/+384h background stage.
-          parameters=['T850','T2'] if scheduled else shlex.split(os.environ['PARAMS'])
-          cycles=recent_cycles(model,count=2)
+          parameters=['T2'] if scheduled else shlex.split(os.environ['PARAMS'])
+          cycles=recent_cycles(model,count=2 if scheduled else 1)
           for index,run in enumerate(cycles):
-              horizons=[48,120] if model=='GEFS' and index==0 else [48]
+              horizons=[48] if scheduled else [48,120]
               for horizon in horizons:
                   if horizon==120:
                       # Probe the farthest step before requesting 1,302 GRIB
@@ -146,14 +114,19 @@ jobs:
         run: |
           # Hourly follow-up reuses cached GEFS member values from the last
           # worker. The short-range graphics were published in the step above.
-          timeout --signal=TERM --kill-after=30s 100m python - <<'PY' || echo "Long-range continuation deferred to next hourly run"
+          timeout --signal=TERM --kill-after=30s 65m python - <<'PY' || echo "Long-range continuation deferred to next hourly run"
           from ensemble_archive import generate, image_path
           from model_cycles import recent_cycles
           from ensembles import gefs_point, PLACES
 
           model='GEFS'
           place='Mühlberg (Elbe)'
-          run=recent_cycles(model,count=1)[0]
+          # Long-range point caches need a stable cycle across hourly jobs.
+          # Pin to the most recent eligible 00 UTC run rather than restarting
+          # from scratch every six hours when a new cycle becomes eligible.
+          from datetime import timedelta
+          eligible=recent_cycles(model,count=1)[0]
+          run=eligible-timedelta(hours=eligible.hour)
           lat,lon=PLACES[place]
           # First extend the three existing products to +240h. Then build
           # the full +384h set, including snow-depth increments and MSLP.
