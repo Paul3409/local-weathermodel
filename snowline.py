@@ -251,7 +251,7 @@ def show(region="Deutschland"):
         st.caption(f"GFS-Lauf {run:%d.%m.%Y %H} UTC · gültig {valid.astimezone(LOCAL_TZ):%d.%m.%Y %H:%M %Z}")
         st.image(png,use_container_width=True)
         st.download_button("PNG herunterladen",png,
-                           file_name=f"ELBTAL_GFS_Schneefallgrenze_{run:%Y%m%d%H}_{hours:03d}.png",
+                           file_name=f"MeteoOST_V2_GFS_Schneefallgrenze_{run:%Y%m%d%H}_{hours:03d}.png",
                            mime="image/png",key="snowline_download")
     st.caption("Nur ein thermodynamischer Indikator: Wo kein Niederschlag fällt, gibt es keinen Schneefall. "
                "Lokale Schmelzschichten, Niederschlagsintensität und bodennahe Effekte "
