@@ -174,7 +174,7 @@ def plot_geometry(ax,geom,linewidth):
         for ring in polygon:
             if len(ring)>1:
                 arr=np.asarray(ring,dtype=float)
-                if getattr(ax,"_meteoost_emphasize_precip_borders",False):
+                if getattr(ax,"_meteoost_emphasize_precip_borders",False) or getattr(ax,"_meteoost_emphasize_ww_borders",False):
                     # Light halo keeps country outlines legible on dark blue/red
                     # as well as light yellow/white precipitation backgrounds.
                     ax.plot(arr[:,0],arr[:,1],color="#F5F7FA",linewidth=linewidth+1.5,alpha=.95,zorder=8)
@@ -702,10 +702,10 @@ def render(X,Y,Z,region,parameter,run,valid,model="ICON-EU",mslp=None):
     try:
         data=borders(COUNTRIES)
         for feature in data.get("features",[]):
-            plot_geometry(ax,feature.get("geometry"),1.05 if parameter=="Akkumulierter Niederschlag" else .55)
+            plot_geometry(ax,feature.get("geometry"),1.05 if parameter=="Akkumulierter Niederschlag" else (0.85 if parameter=="Signifikantes Wetter" else .55))
         if region=="Deutschland":
             for feature in borders(STATES).get("features",[]):
-                plot_geometry(ax,feature.get("geometry"),.35)
+                plot_geometry(ax,feature.get("geometry"),.60 if parameter=="Signifikantes Wetter" else .35)
     except requests.RequestException as exc:
         raise RuntimeError(f"Grenzdaten nicht erreichbar: {exc}") from exc
     ax.set_xlim(bounds[0],bounds[1])
