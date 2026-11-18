@@ -4,6 +4,8 @@ No ensemble means are used. Incomplete data fail closed rather than producing
 misleading percentages. Time windows are from initialization (+0 to +N h).
 """
 import io
+import time
+import random
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
@@ -129,11 +131,30 @@ def gefs_record(run,step,member,variable,level,region):
             f"var_{variable}":"on",f"lev_{level.replace(' ','_')}":"on",
             "subregion":"","leftlon":west-1,"rightlon":east+1,
             "toplat":north+1,"bottomlat":south-1}
-    response=requests.get(GEFS_FILTER,params=params,headers=HEADERS,timeout=100)
-    response.raise_for_status()
-    if not response.content.startswith(b"GRIB"):
-        raise RuntimeError(f"GEFS-Mitglied {member} +{step}h: Feld nicht verfügbar.")
-    return response.content
+    # NOMADS explicitly warns against rapid repeated GRIB-filter requests.
+    # Treat transient HTML/rate-limit responses as service errors, not as
+    # proof that a specific GEFS member does not exist.
+    last_error=""
+    for attempt in range(5):
+        try:
+            response=requests.get(GEFS_FILTER,params=params,headers=HEADERS,timeout=100)
+            if response.status_code in (429,500,502,503,504):
+                last_error=f"HTTP {response.status_code}"
+            else:
+                response.raise_for_status()
+                if response.content.startswith(b"GRIB"):
+                    return response.content
+                excerpt=response.text[:180].replace("\\n"," ") if len(response.content)<100000 else ""
+                last_error=f"kein GRIB (HTTP {response.status_code}, {excerpt})"
+                # An HTML error response may mean a temporary server issue.
+        except requests.RequestException as exc:
+            last_error=str(exc)[:180]
+        if attempt<4:
+            time.sleep(min(2**attempt*1.5,12)+random.uniform(.1,.7))
+    raise RuntimeError(
+        f"GEFS-Mitglied {member} +{step}h: NOMADS-Abruf fehlgeschlagen nach "
+        f"5 Versuchen ({last_error}).")
+
 
 
 @st.cache_data(ttl=1800,show_spinner=False)
@@ -215,11 +236,14 @@ def calculate(model,run,region,parameter,hours,progress=None):
     # Prevent silent partial datasets: all requested hours and members
     # must be present. Concurrency is deliberately bounded.
     jobs=[(m,t) for m in members for t in timeline if t>0]
+    if model=="GEFS":
+        st.caption(f"GEFS: {len(jobs)} Einzelabfragen; NOAA NOMADS begrenzt intensive Filterzugriffe. "
+                   "Die Berechnung kann länger dauern.")
     if len(jobs)>3500:raise RuntimeError("Datenmenge für eine Einzelberechnung zu groß.")
     grids={}
     failed={}
     failure_reasons={}
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         futures={pool.submit(_member_step,model,run,t,m,variable,level,region,member_urls):(m,t)
                  for m,t in jobs}
         for i,future in enumerate(as_completed(futures),1):
@@ -282,7 +306,7 @@ def calculate(model,run,region,parameter,hours,progress=None):
         raise RuntimeError(
             f"Zu wenige vollständige Ensemblemitglieder: {len(good)}/{total} "
             f"(mindestens {required} erforderlich). "
-            f"Fehlerbeispiele: {list(failure_reasons.items())[:3]}. "
+            f"Fehlerbeispiele: {[(m, reasons[:2]) for m,reasons in list(failure_reasons.items())[:3]]}. "
             "Keine verlässliche Karte möglich.")
     threshold=dict(CATEGORIES["Temperatur"] if kind=="temp" else CATEGORIES["Niederschlag"])[parameter]
     op="<" if "<" in parameter else ">"
