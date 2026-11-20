@@ -98,7 +98,7 @@ def show_model_maps():
 def show():
     st.caption("MeteoOST V2 | v2.2.0 · zentrale Navigation")
     section=dropdown("Bereich", "v2_section",
-                     ["Modelle", "Modellvergleich", "Ensembles", "Radar"])
+                     ["Modelle", "Modellvergleich", "Ensembles", "Radar", "Eigene Prognosen"])
     if section=="Modelle":
         show_model_maps()
         return True
@@ -109,6 +109,10 @@ def show():
     if section=="Ensembles":
         from ensembles import show as show_ensembles
         show_ensembles()
+        return True
+    if section=="Eigene Prognosen":
+        from forecast_editor import show as show_editor
+        show_editor()
         return True
     if section=="Radar":
         from radar import show as show_radar
