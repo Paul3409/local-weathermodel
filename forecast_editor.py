@@ -10,45 +10,69 @@ import numpy as np
 import streamlit as st
 from scipy.ndimage import gaussian_filter
 from scipy.spatial.distance import cdist
-from icon_eu import REGIONS, borders, COUNTRIES, render
+REGIONS = {"Deutschland": (5.5, 15.6, 47.0, 55.3), "Mitteleuropa": (2.0, 27.0, 44.0, 58.0), "Europa & Nordatlantik": (-65.0, 65.0, 32.0, 72.0)}
 
 KINDS={"T850":"Temperatur T850 (°C)","H":"Hochdruckzentrum (hPa)","T":"Tiefdruckzentrum (hPa)"}
 
 
-def _outline(fig, geometry):
-    if not geometry:
-        return
-    typ=geometry.get("type")
-    polys=[geometry["coordinates"]] if typ=="Polygon" else geometry.get("coordinates",[]) if typ=="MultiPolygon" else []
-    import plotly.graph_objects as go
-    for polygon in polys:
-        for ring in polygon:
-            if len(ring)<2:
-                continue
-            arr=np.asarray(ring)
-            fig.add_trace(go.Scatter(x=arr[:,0],y=arr[:,1],mode="lines",
-                line=dict(color="#647C8C",width=0.8),hoverinfo="skip",showlegend=False))
+@st.cache_data(ttl=86400,show_spinner=False)
+def _coastlines():
+    """Small cached GeoJSON coastline geometry; never block the editor on network."""
+    import requests
+    try:
+        response=requests.get(
+            "https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson",
+            timeout=3)
+        response.raise_for_status()
+        features=response.json().get("features",[])
+        lines=[]
+        for feature in features:
+            geometry=feature.get("geometry") or {}
+            kind=geometry.get("type")
+            polygons=[geometry["coordinates"]] if kind=="Polygon" else geometry.get("coordinates",[]) if kind=="MultiPolygon" else []
+            for polygon in polygons:
+                for ring in polygon:
+                    if len(ring)<2:
+                        continue
+                    # Lightweight simplification: roughly every tenth coordinate.
+                    sampled=ring[::max(1,len(ring)//120)]
+                    if sampled[-1]!=ring[-1]:
+                        sampled.append(ring[-1])
+                    lines.append(sampled)
+        return lines
+    except Exception:
+        return []
 
 
 def _map(region, points):
     import plotly.graph_objects as go
     west,east,south,north=REGIONS[region]
     fig=go.Figure()
-    try:
-        for feature in borders(COUNTRIES).get("features",[]):
-            _outline(fig,feature.get("geometry"))
-    except Exception:
-        st.caption("Grenzdaten derzeit nicht verfügbar; Punkte können trotzdem gesetzt werden.")
-    # A regular, nearly invisible hit grid makes mobile taps work anywhere
+    # Draw borders in a single lightweight trace instead of hundreds of traces.
+    border_x,border_y=[],[]
+    for ring in _coastlines():
+        for x,y in ring:
+            if west-5<=x<=east+5 and south-5<=y<=north+5:
+                border_x.append(x)
+                border_y.append(y)
+            else:
+                border_x.append(None)
+                border_y.append(None)
+        border_x.append(None)
+        border_y.append(None)
+    if border_x:
+        fig.add_trace(go.Scattergl(x=border_x,y=border_y,mode="lines",
+            line=dict(color="#B1C7D8",width=1),hoverinfo="skip",showlegend=False))
+    # Visible, selectable location grid makes mobile taps work anywhere
     # in the map area (Plotly selection requires a selectable trace).
-    xs=np.linspace(west,east,48)
-    ys=np.linspace(south,north,32)
+    xs=np.linspace(west,east,30)
+    ys=np.linspace(south,north,20)
     gx,gy=np.meshgrid(xs,ys)
     fig.add_trace(go.Scatter(x=gx.ravel(),y=gy.ravel(),mode="markers",
-        marker=dict(size=12,color="rgba(90,180,220,0.025)"),
+        marker=dict(size=14,color="rgba(90,180,220,0.25)"),
         customdata=["editor_hit"]*gx.size,
-        selected=dict(marker=dict(opacity=0.12)),
-        unselected=dict(marker=dict(opacity=0.025)),
+        selected=dict(marker=dict(opacity=0.95,color="#F7D35D")),
+        unselected=dict(marker=dict(opacity=0.25)),
         name="Kartenposition",hovertemplate="%{x:.2f}° / %{y:.2f}°<extra></extra>"))
     for kind,marker,color in [("H","H","#49C2FF"),("T","T","#FF7171"),("T850","°","#FFFFFF")]:
         selected=[p for p in points if p["kind"]==kind]
@@ -112,6 +136,7 @@ def _render(region,points,smoothing,valid):
     pressure=_pressure(X,Y,points,smoothing)
     # Reuse the established MeteoOST temperature palette and 4:3 frame.
     run=valid
+    from icon_eu import render
     png=render(X,Y,temp,region,"T850 + MSLP",run,valid,
                model="Eigene Prognose",mslp=pressure)
     from PIL import Image,ImageDraw,ImageFont
