@@ -46,6 +46,7 @@ def _map(region, points):
     gx,gy=np.meshgrid(xs,ys)
     fig.add_trace(go.Scatter(x=gx.ravel(),y=gy.ravel(),mode="markers",
         marker=dict(size=12,color="rgba(90,180,220,0.025)"),
+        customdata=["editor_hit"]*gx.size,
         selected=dict(marker=dict(opacity=0.12)),
         unselected=dict(marker=dict(opacity=0.025)),
         name="Kartenposition",hovertemplate="%{x:.2f}° / %{y:.2f}°<extra></extra>"))
@@ -142,7 +143,7 @@ def show():
     selected=event.selection.points if event is not None else []
     # Only hit-grid points (curve_number may vary with the country outlines).
     selected=[p for p in selected if "x" in p and "y" in p
-              and p.get("curve_number",p.get("curveNumber",-1))>=0]
+              and p.get("customdata")=="editor_hit"]
     if selected:
         point=selected[-1]
         st.session_state["editor_click_"+region]=(float(point["x"]),float(point["y"]))
@@ -184,7 +185,8 @@ def show():
         except Exception as exc:
             st.error(f"Karte konnte nicht erstellt werden: {type(exc).__name__}: {exc}")
     result=st.session_state.get("editor_result")
-    if result and result[0]==region:
+    current_signature=tuple((p["kind"],p["lon"],p["lat"],p["value"]) for p in points)
+    if result and result[0]==region and result[2]==current_signature:
         st.image(result[3],use_container_width=True)
         st.download_button("PNG herunterladen",result[3],
             file_name=f'MeteoOST_Eigene_Prognose_{region.replace(" ","_")}.png',mime="image/png")
