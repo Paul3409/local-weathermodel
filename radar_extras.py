@@ -28,7 +28,7 @@ PATTERNS = {
 }
 # German municipalities above ~500,000 inhabitants plus ELBTAL's Mühlberg.
 CITIES = (
-    ("Berlin", 13.405, 52.520), ("Hamburg", 9.993, 53.551),
+    ("Berlin", 13.405, 52.520), ("Potsdam", 13.064, 52.39), ("Magdeburg", 11.627, 52.13), ("Halle", 11.97, 51.48), ("Cottbus", 14.33, 51.76), ("Frankfurt/O.", 14.55, 52.34), ("Hamburg", 9.993, 53.551),
     ("München", 11.582, 48.135), ("Köln", 6.961, 50.938),
     ("Frankfurt/M.", 8.682, 50.111), ("Stuttgart", 9.182, 48.776),
     ("Düsseldorf", 6.774, 51.228), ("Leipzig", 12.375, 51.340),
@@ -164,9 +164,9 @@ def accumulated_rw(hours, end_time):
     total[~valid] = np.nan
     return total, geometry
 
-def _sample_to_map(data, geometry):
+def _sample_to_map(data, geometry, region="Deutschland"):
     """Nearest-neighbor sample on the fixed ELBTAL Germany map grid."""
-    _, _, rows, cols = radar.sample_geometry(*geometry, data.shape)
+    _, _, rows, cols = radar.sample_geometry(*geometry, data.shape, region)
     valid = (rows >= 0) & (rows < data.shape[0]) & (cols >= 0) & (cols < data.shape[1])
     grid = map_coordinates(np.nan_to_num(data, nan=-9999), [rows, cols],
                            order=0, mode="constant", cval=-9999)
@@ -198,11 +198,11 @@ def matching_wn_frame(stamp):
 
 
 def render_extra(data, geometry, product, stamp, cities=False, hours=None,
-                 reflectivity=None, reflectivity_geometry=None):
-    grid = _sample_to_map(data, geometry)
+                 reflectivity=None, reflectivity_geometry=None, region="Deutschland"):
+    grid = _sample_to_map(data, geometry, region)
     if product == "HYMEC":
         if reflectivity is not None and reflectivity_geometry is not None:
-            dbz_grid = _sample_to_map(reflectivity, reflectivity_geometry)
+            dbz_grid = _sample_to_map(reflectivity, reflectivity_geometry, region)
             grid = classify_precipitation(grid, dbz_grid)
         # Reorder legend independently of DWD's fixed HYMEC class codes.
         # Graupel (8) and Hagel (9) share one display category.
@@ -243,18 +243,20 @@ def render_extra(data, geometry, product, stamp, cities=False, hours=None,
     fig, ax = plt.subplots(figsize=(15, 8.2), dpi=120)
     fig.patch.set_facecolor("#071e35")
     ax.set_facecolor("#10273e")
-    image = ax.imshow(grid, origin="lower", extent=(5.4, 15.6, 46.9, 55.4),
+    image = ax.imshow(grid, origin="lower", extent=radar.RADAR_REGIONS[region],
                       cmap=cmap, norm=norm, interpolation="nearest", aspect="auto")
-    radar.draw_boundaries(ax)
+    radar.draw_boundaries(ax, region)
     if cities:
         for name, lon, lat in CITIES:
+            w,e,s,n=radar.RADAR_REGIONS[region]
+            if not (w<=lon<=e and s<=lat<=n): continue
             ax.scatter([lon], [lat], s=9, marker="s", color="white", zorder=30)
             ax.annotate(name, (lon, lat), xytext=(3, 4), textcoords="offset points",
                         fontsize=8, color="white", zorder=31,
                         path_effects=[patheffects.withStroke(linewidth=2.5,
                                                               foreground="#061c35")])
-    ax.set_xlim(5.4, 15.6)
-    ax.set_ylim(46.9, 55.4)
+    ax.set_xlim(*radar.RADAR_REGIONS[region][:2])
+    ax.set_ylim(*radar.RADAR_REGIONS[region][2:])
     ax.tick_params(colors="#d6e5f2", labelsize=9)
     for spine in ax.spines.values():
         spine.set_color("#78a4c2")
@@ -273,11 +275,12 @@ def render_extra(data, geometry, product, stamp, cities=False, hours=None,
     output = io.BytesIO()
     fig.savefig(output, format="png", facecolor=fig.get_facecolor(), dpi=120)
     plt.close(fig)
-    return frame_png(output.getvalue(), title, "DWD RADOLAN", "Deutschland",
+    return frame_png(output.getvalue(), title, "DWD RADOLAN", region,
                      stamp, stamp, portrait_override=False)
 
 def show():
-    st.subheader("📡 ELBTAL | Regenradar Deutschland")
+    st.subheader("📡 ELBTAL | Regenradar")
+    region = st.selectbox("Radarregion", list(radar.RADAR_REGIONS), key="radar_region")
     mode = st.selectbox(
         "Radarparameter",
         ["Reflektivität (dBZ)", "Regenrate (mm/h)", "Live-Wetteranalyse", "Niederschlagssummen", "Hagelrisiko", "Hagelrisiko HD"],
@@ -291,7 +294,7 @@ def show():
     hours = (st.selectbox("Zeitraum", [1, 3, 6, 12, 24],
                           format_func=lambda n: f"{n} Stunden", key="radar_rw_hours")
              if product == "RW" else None)
-    cities = st.checkbox("Städtenamen einblenden (über 500.000 Einwohner + Mühlberg/E.)",
+    cities = st.checkbox("Städtenamen einblenden",
                          value=False, key="radar_city_overlay")
     st.caption("DWD-Radardaten · HYMEC: bodennahe Niederschlagsart; "
                "RW: stationskorrigierte stündliche Niederschlagssummen.")
@@ -322,14 +325,14 @@ def show():
         stamp, url = frames[idx]
         st.caption(f"Messzeit: {stamp.astimezone(radar.TZ):%d.%m.%Y %H:%M %Z} "
                    f"· UTC {stamp:%H:%M}")
-    cache_key = (product, url, hours, cities, "intensity-v1")
+    cache_key = (product, url, hours, cities, "intensity-v2", region)
     if st.button("📡 Radaraufnahme laden", type="primary"):
         try:
             with st.spinner("Originale DWD-Radardaten laden …"):
                 if product == "KONRAD3D":
                     import radar_hail
                     cells = radar_hail.load_cells(url)
-                    png = radar_hail.render(cells, stamp, cities=cities)
+                    png = radar_hail.render(cells, stamp, cities=cities, region=region)
                 elif product == "HAIL_HD":
                     import radar_hail_hd
                     field, geo = radar.load_frame(url, "WN")
@@ -338,7 +341,7 @@ def show():
                     except (requests.RequestException, ValueError, RuntimeError) as exc:
                         cells = []
                         st.info(f"KONRAD3D-Zellüberlagerung nicht verfügbar ({type(exc).__name__}).")
-                    png = radar_hail_hd.render(field, geo, stamp, cells=cells, cities=cities)
+                    png = radar_hail_hd.render(field, geo, stamp, cells=cells, cities=cities, region=region)
                 elif product == "RW":
                     field, geo = accumulated_rw(hours, stamp)
                 elif product == "HYMEC":
@@ -361,7 +364,7 @@ def show():
                 if product not in ("KONRAD3D", "HAIL_HD"):
                     png = render_extra(field, geo, product, stamp, cities=cities, hours=hours,
                                        reflectivity=reflectivity,
-                                       reflectivity_geometry=reflectivity_geometry)
+                                       reflectivity_geometry=reflectivity_geometry, region=region)
             st.session_state["radar_image_extra"] = (cache_key, png)
         except Exception as exc:
             st.error(f"Radaraufnahme nicht darstellbar: {type(exc).__name__}: {exc}")
@@ -370,7 +373,7 @@ def show():
         png = cached[1]
         st.image(png, width="stretch")
         st.download_button("PNG herunterladen", png,
-                           file_name=f"ELBTAL_Radar_{product}_{stamp:%Y%m%d_%H%M}.png",
+                           file_name=f"ELBTAL_Radar_{region}_{product}_{stamp:%Y%m%d_%H%M}.png",
                            mime="image/png")
     if product == "RW":
         st.caption("RW: 60-Minuten-Mengen (mm) in genau einstündigem Abstand. "
