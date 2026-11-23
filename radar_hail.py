@@ -114,12 +114,12 @@ def load_cells(url):
     return cells
 
 
-def render(cells, stamp, cities=False):
+def render(cells, stamp, cities=False, region="Deutschland"):
     fig, ax = plt.subplots(figsize=(15, 8.2), dpi=120)
     fig.patch.set_facecolor("#071e35")
     ax.set_facecolor("#10273e")
-    ax.set_xlim(5.4, 15.6)
-    ax.set_ylim(46.9, 55.4)
+    ax.set_xlim(*radar.RADAR_REGIONS[region][:2])
+    ax.set_ylim(*radar.RADAR_REGIONS[region][2:])
     # Show colored footprint of each identified convective cell, not a
     # fictitious countrywide interpolated probability field.
     for grade, polygons, lon, lat in sorted(cells, key=lambda item: item[0]):
@@ -131,11 +131,13 @@ def render(cells, stamp, cities=False):
         if not polygons and np.isfinite(lon) and np.isfinite(lat):
             ax.scatter([lon], [lat], color=COLORS[grade], s=70,
                        edgecolors="white", linewidths=.6, zorder=9)
-    radar.draw_boundaries(ax)
+    radar.draw_boundaries(ax, region)
     if cities:
         from radar_extras import CITIES
         from matplotlib import patheffects
         for name, lon, lat in CITIES:
+            w,e,s,n=radar.RADAR_REGIONS[region]
+            if not (w<=lon<=e and s<=lat<=n): continue
             ax.scatter([lon], [lat], s=9, marker="s", color="white", zorder=30)
             ax.annotate(name, (lon, lat), xytext=(3, 4), textcoords="offset points",
                         fontsize=8, color="white", zorder=31,
@@ -161,4 +163,4 @@ def render(cells, stamp, cities=False):
     fig.savefig(output, format="png", facecolor=fig.get_facecolor(), dpi=120)
     plt.close(fig)
     return frame_png(output.getvalue(), "Hagelrisiko", "DWD KONRAD3D",
-                     "Deutschland", stamp, stamp, portrait_override=False)
+                     region, stamp, stamp, portrait_override=False)
