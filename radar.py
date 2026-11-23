@@ -20,6 +20,8 @@ from scipy.ndimage import map_coordinates
 from pyproj import Transformer, CRS
 from map_design import frame_png
 
+RADAR_REGIONS={"Deutschland": (5.4,15.6,46.9,55.4), "Brandenburg": (10.2,15.5,50.6,54.0)}
+
 BASE="https://opendata.dwd.de/weather/radar/"
 TZ=ZoneInfo("Europe/Berlin")
 HEADERS={"User-Agent":"MeteoOst educational weather radar visualization"}
@@ -107,9 +109,10 @@ def load_frame(url,product):
         return values,(crs.to_string(),x0,y0,x1,y1)
 
 @st.cache_data(ttl=86400,show_spinner=False)
-def sample_geometry(proj,x0,y0,x1,y1,shape):
-    lon=np.linspace(5.4,15.6,800)
-    lat=np.linspace(46.9,55.4,720)
+def sample_geometry(proj,x0,y0,x1,y1,shape,region="Deutschland"):
+    west,east,south,north=RADAR_REGIONS[region]
+    lon=np.linspace(west,east,800)
+    lat=np.linspace(south,north,720)
     X,Y=np.meshgrid(lon,lat)
     transformer=Transformer.from_crs("EPSG:4326",CRS.from_user_input(proj),always_xy=True)
     px,py=transformer.transform(X,Y)
@@ -118,8 +121,9 @@ def sample_geometry(proj,x0,y0,x1,y1,shape):
     row=(y1-py)/(y1-y0)*ny-.5
     return X,Y,row,col
 
-def draw_boundaries(ax):
+def draw_boundaries(ax, region="Deutschland"):
     """Fast high-contrast outlines, batched instead of thousands of plot artists."""
+    west,east,south,north=RADAR_REGIONS[region]
     from icon_eu import borders, COUNTRIES, STATES
     from matplotlib.collections import LineCollection
     for url,is_country in ((COUNTRIES,True),(STATES,False)):
@@ -138,8 +142,8 @@ def draw_boundaries(ax):
                         if points.ndim!=2 or points.shape[1]<2:
                             continue
                         # Skip features entirely outside the German radar viewport.
-                        if (np.nanmax(points[:,0])<5.4 or np.nanmin(points[:,0])>15.6
-                            or np.nanmax(points[:,1])<46.9 or np.nanmin(points[:,1])>55.4):
+                        if (np.nanmax(points[:,0])<west or np.nanmin(points[:,0])>east
+                            or np.nanmax(points[:,1])<south or np.nanmin(points[:,1])>north):
                             continue
                         # Screen resolution cannot resolve subpixel border vertices.
                         stride=max(1,len(points)//1400)
