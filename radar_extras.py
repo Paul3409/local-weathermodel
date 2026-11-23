@@ -198,7 +198,7 @@ def matching_wn_frame(stamp):
 
 
 def render_extra(data, geometry, product, stamp, cities=False, hours=None,
-                 reflectivity=None, reflectivity_geometry=None, region="Deutschland"):
+                 reflectivity=None, reflectivity_geometry=None, region="Deutschland", lightning=None):
     grid = _sample_to_map(data, geometry, region)
     if product == "HYMEC":
         if reflectivity is not None and reflectivity_geometry is not None:
@@ -255,6 +255,9 @@ def render_extra(data, geometry, product, stamp, cities=False, hours=None,
                         fontsize=8, color="white", zorder=31,
                         path_effects=[patheffects.withStroke(linewidth=2.5,
                                                               foreground="#061c35")])
+    if lightning is not None:
+        import radar_lightning
+        radar_lightning.draw(ax, lightning)
     ax.set_xlim(*radar.RADAR_REGIONS[region][:2])
     ax.set_ylim(*radar.RADAR_REGIONS[region][2:])
     ax.tick_params(colors="#d6e5f2", labelsize=9)
@@ -275,7 +278,7 @@ def render_extra(data, geometry, product, stamp, cities=False, hours=None,
     output = io.BytesIO()
     fig.savefig(output, format="png", facecolor=fig.get_facecolor(), dpi=120)
     plt.close(fig)
-    return frame_png(output.getvalue(), title, "DWD RADOLAN", region,
+    return frame_png(output.getvalue(), title, "DWD RADOLAN + Xweather" if lightning is not None else "DWD RADOLAN", region,
                      stamp, stamp, portrait_override=False)
 
 def show():
@@ -296,6 +299,11 @@ def show():
              if product == "RW" else None)
     cities = st.checkbox("Städtenamen einblenden",
                          value=False, key="radar_city_overlay")
+    lightning_enabled = st.checkbox("⚡ Blitze einblenden (30 Minuten)", value=False, key="radar_lightning_overlay", disabled=product in ("KONRAD3D", "HAIL_HD", "RW"))
+    if product in ("KONRAD3D", "HAIL_HD", "RW"):
+        lightning_enabled = False
+    if lightning_enabled:
+        st.caption("Blitzalter relativ zur Radarzeit · Xweather Lightning Enterprise erforderlich.")
     st.caption("DWD-Radardaten · HYMEC: bodennahe Niederschlagsart; "
                "RW: stationskorrigierte stündliche Niederschlagssummen.")
     try:
@@ -325,7 +333,7 @@ def show():
         stamp, url = frames[idx]
         st.caption(f"Messzeit: {stamp.astimezone(radar.TZ):%d.%m.%Y %H:%M %Z} "
                    f"· UTC {stamp:%H:%M}")
-    cache_key = (product, url, hours, cities, "intensity-v2", region)
+    cache_key = (product, url, hours, cities, "intensity-v3", region, lightning_enabled)
     if st.button("📡 Radaraufnahme laden", type="primary"):
         try:
             with st.spinner("Originale DWD-Radardaten laden …"):
@@ -362,9 +370,16 @@ def show():
                         st.info("WN-Reflektivität nicht verfügbar; originale HYMEC-Klassen "
                                 f"werden angezeigt ({type(exc).__name__}).")
                 if product not in ("KONRAD3D", "HAIL_HD"):
+                    lightning = None
+                    if lightning_enabled:
+                        import radar_lightning
+                        try:
+                            lightning = radar_lightning.load(radar.RADAR_REGIONS[region], stamp)
+                        except (RuntimeError, ValueError, KeyError, TypeError) as exc:
+                            st.warning("Blitzüberlagerung nicht verfügbar. Radar ohne Blitze wird angezeigt.")
                     png = render_extra(field, geo, product, stamp, cities=cities, hours=hours,
                                        reflectivity=reflectivity,
-                                       reflectivity_geometry=reflectivity_geometry, region=region)
+                                       reflectivity_geometry=reflectivity_geometry, region=region, lightning=lightning)
             st.session_state["radar_image_extra"] = (cache_key, png)
         except Exception as exc:
             st.error(f"Radaraufnahme nicht darstellbar: {type(exc).__name__}: {exc}")
