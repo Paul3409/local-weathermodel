@@ -39,8 +39,8 @@ def matching_cells(stamp):
     return radar_hail.load_cells(candidate[1])
 
 
-def render(values, geometry, stamp, cells=(), cities=False):
-    X, Y, row, col = radar.sample_geometry(*geometry, values.shape)
+def render(values, geometry, stamp, cells=(), cities=False, region="Deutschland"):
+    X, Y, row, col = radar.sample_geometry(*geometry, values.shape, region)
     valid = (row >= 0) & (row < values.shape[0]) & (col >= 0) & (col < values.shape[1])
     sampled = map_coordinates(np.nan_to_num(values, nan=-9999),
                               [row, col], order=0, mode="constant", cval=-9999)
@@ -54,7 +54,7 @@ def render(values, geometry, stamp, cells=(), cities=False):
     fig, ax = plt.subplots(figsize=(15, 8.2), dpi=120)
     fig.patch.set_facecolor("#071e35")
     ax.set_facecolor("#10273e")
-    ax.imshow(display, origin="lower", extent=(5.4, 15.6, 46.9, 55.4),
+    ax.imshow(display, origin="lower", extent=radar.RADAR_REGIONS[region],
               aspect="auto", cmap=palette, norm=norm, interpolation="nearest")
 
     # Outlines indicate actual KONRAD3D hail detection; no filled fake probabilities.
@@ -69,17 +69,19 @@ def render(values, geometry, stamp, cells=(), cities=False):
             ax.scatter([lon], [lat], marker="o", facecolors="none",
                        edgecolors=color, s=90, linewidths=2, zorder=18)
 
-    radar.draw_boundaries(ax)
+    radar.draw_boundaries(ax, region)
     if cities:
         from radar_extras import CITIES
         for name, lon, lat in CITIES:
+            w,e,s,n=radar.RADAR_REGIONS[region]
+            if not (w<=lon<=e and s<=lat<=n): continue
             ax.scatter([lon], [lat], s=9, marker="s", color="white", zorder=30)
             ax.annotate(name, (lon, lat), xytext=(3, 4), textcoords="offset points",
                         fontsize=8, color="white", zorder=31,
                         path_effects=[patheffects.withStroke(linewidth=2.5,
                                                               foreground="#061c35")])
-    ax.set_xlim(5.4, 15.6)
-    ax.set_ylim(46.9, 55.4)
+    ax.set_xlim(*radar.RADAR_REGIONS[region][:2])
+    ax.set_ylim(*radar.RADAR_REGIONS[region][2:])
     ax.tick_params(colors="#d6e5f2", labelsize=9)
     for spine in ax.spines.values():
         spine.set_color("#78a4c2")
@@ -98,4 +100,4 @@ def render(values, geometry, stamp, cells=(), cities=False):
     fig.savefig(output, format="png", facecolor=fig.get_facecolor(), dpi=120)
     plt.close(fig)
     return frame_png(output.getvalue(), "Hagelrisiko HD", "DWD WN + KONRAD3D",
-                     "Deutschland", stamp, stamp, portrait_override=False)
+                     region, stamp, stamp, portrait_override=False)
