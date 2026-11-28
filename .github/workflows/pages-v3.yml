@@ -18,6 +18,11 @@ jobs:
         with:
           python-version: '3.11'
       - run: python scripts/build_pages.py
+      - name: Install ICON-D2 dependencies
+        run: pip install numpy scipy matplotlib requests eccodes
+      - name: Generate ICON-D2 maps
+        continue-on-error: true
+        run: python scripts/build_icon_d2.py
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
