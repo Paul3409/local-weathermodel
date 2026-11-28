@@ -19,10 +19,11 @@ jobs:
           python-version: '3.11'
       - run: python scripts/build_pages.py
       - name: Install ICON-D2 dependencies
-        run: pip install numpy scipy matplotlib requests eccodes
+        run: pip install numpy scipy matplotlib requests eccodes cartopy
       - name: Generate ICON-D2 maps
-        continue-on-error: true
         run: python scripts/build_icon_d2.py
+      - name: Verify ICON-D2 products
+        run: python -c "import json,pathlib; p=pathlib.Path('_site'); d=json.loads((p/'icon-d2/index.json').read_text()); assert len(d['products']) >= 25; assert all((p/x['path']).stat().st_size > 1000 for x in d['products'])"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
