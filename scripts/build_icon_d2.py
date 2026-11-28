@@ -1,4 +1,4 @@
-"""Generate local ICON-D2 temperature maps directly from DWD GRIB."""
+"""Generate Germany ICON-D2 temperature maps directly from DWD GRIB."""
 import bz2, json, re, tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -52,20 +52,18 @@ for h in hours:
             valid = datetime.strptime(str(codes_get(gid,"validityDate"))+f'{codes_get(gid,"validityTime"):04d}',"%Y%m%d%H%M").replace(tzinfo=timezone.utc)
         finally:
             codes_release(gid)
-    mask = (lat>=51.19)&(lat<=51.59)&(lon>=13.01)&(lon<=13.49)&np.isfinite(val)&(val>-100)&(val<70)
-    if mask.sum()<6:
-        raise ValueError("Insufficient local grid points")
-    x,y=np.meshgrid(np.linspace(13.10,13.40,235),np.linspace(51.28,51.50,245))
+    mask = (lat>=47)&(lat<=55.2)&(lon>=5.5)&(lon<=15.5)&np.isfinite(val)&(val>-100)&(val<70)
+    if mask.sum()<100:
+        raise ValueError("Insufficient Germany grid points")
+    x,y=np.meshgrid(np.linspace(5.5,15.5,450),np.linspace(47,55.2,450))
     z=griddata((lon[mask],lat[mask]),val[mask],(x,y),method="linear")
-    if not np.isfinite(z).all():
-        z=np.where(np.isfinite(z),z,griddata((lon[mask],lat[mask]),val[mask],(x,y),method="nearest"))
     fig,ax=plt.subplots(figsize=(8,7),layout="constrained",facecolor="#101a2b")
     im=ax.pcolormesh(x,y,z,cmap="turbo",vmin=-15,vmax=35,shading="auto")
-    ax.set_aspect(1/np.cos(np.deg2rad(51.39)))
-    for name,a,b in [("Belgern",51.483,13.125),("Mühlberg",51.434,13.222),("Zeithain",51.334,13.338),("Nünchritz",51.299,13.388),("Glaubitz",51.325,13.379)]:
+    ax.set_aspect(1/np.cos(np.deg2rad(51.1)))
+    for name,a,b in [("Berlin",52.52,13.405),("Hamburg",53.55,9.99),("München",48.14,11.58),("Köln",50.94,6.96),("Frankfurt",50.11,8.68),("Leipzig",51.34,12.37)]:
         ax.plot(b,a,"k.",ms=5)
         ax.annotate(name,(b,a),xytext=(-3,5),textcoords="offset points",ha="right",fontsize=9,color="black",bbox=dict(fc="white",alpha=.8,ec="none",pad=1))
-    ax.set_title(f"ICON-D2 | 2-m-Temperatur\n{valid:%d.%m.%Y %H:%M} UTC | +{h} h",color="white")
+    ax.set_title(f"ICON-D2 | Deutschland | 2-m-Temperatur\n{valid:%d.%m.%Y %H:%M} UTC | +{h} h",color="white")
     ax.tick_params(colors="white")
     cb=fig.colorbar(im,ax=ax,label="°C",extend="both")
     cb.ax.tick_params(colors="white")
