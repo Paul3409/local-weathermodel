@@ -36,7 +36,7 @@ jobs:
         if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: python scripts/build_icon_d2.py
       - name: Verify ICON-D2 products
-        run: python -c "import json,pathlib; p=pathlib.Path('_site'); d=json.loads((p/'icon-d2/index.json').read_text()); assert len(d['products']) >= 25; assert all((p/x['path']).stat().st_size > 1000 for x in d['products'])"
+        run: python -c "import json,pathlib; p=pathlib.Path('_site'); d=json.loads((p/'icon-d2/index.json').read_text()); assert all(sum(x.get('param') == k for x in d['products']) >= 24 for k in ('t2','gust','precip','rate','snow')); assert all((p/x['path']).stat().st_size > 1000 for x in d['products'])"
       - name: Save verified weather products
         if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         uses: actions/cache/save@v4
