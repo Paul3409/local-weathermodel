@@ -7,6 +7,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '45 * * * *'
+concurrency:
+  group: meteoost-pages-${{ github.ref }}
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
@@ -18,12 +21,28 @@ jobs:
         with:
           python-version: '3.11'
       - run: python scripts/build_pages.py
+      - name: Restore latest compatible weather products
+        id: weather
+        uses: actions/cache/restore@v4
+        with:
+          path: _site/icon-d2
+          key: icon-d2-${{ hashFiles('scripts/build_icon_d2.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            icon-d2-${{ hashFiles('scripts/build_icon_d2.py') }}-
       - name: Install ICON-D2 dependencies
+        if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: pip install numpy scipy matplotlib requests eccodes cartopy
       - name: Generate ICON-D2 maps
+        if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: python scripts/build_icon_d2.py
       - name: Verify ICON-D2 products
         run: python -c "import json,pathlib; p=pathlib.Path('_site'); d=json.loads((p/'icon-d2/index.json').read_text()); assert len(d['products']) >= 25; assert all((p/x['path']).stat().st_size > 1000 for x in d['products'])"
+      - name: Save verified weather products
+        if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache/save@v4
+        with:
+          path: _site/icon-d2
+          key: icon-d2-${{ hashFiles('scripts/build_icon_d2.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
