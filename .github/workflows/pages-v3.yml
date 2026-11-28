@@ -9,11 +9,12 @@ on:
     - cron: '45 * * * *'
 concurrency:
   group: meteoost-pages-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'push' && !contains(github.event.head_commit.message, 'ensemble') }}
 permissions:
   contents: read
 jobs:
   build:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +34,7 @@ jobs:
         if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: pip install numpy scipy matplotlib requests eccodes cartopy
       - name: Generate ICON-D2 maps
+        timeout-minutes: 12
         if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: python scripts/build_icon_d2.py
       - name: Verify ICON-D2 products
