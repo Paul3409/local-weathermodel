@@ -16,7 +16,7 @@ jobs:
   build:
     needs: eu
     if: always() && !cancelled()
-    timeout-minutes: 15
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
         if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: pip install numpy scipy matplotlib requests eccodes cartopy
       - name: Generate ICON-D2 maps
-        timeout-minutes: 12
+        timeout-minutes: 22
         if: steps.weather.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: python scripts/build_icon_d2.py
       - name: Verify ICON-D2 products
@@ -58,7 +58,7 @@ jobs:
           path: _site
   eu:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4

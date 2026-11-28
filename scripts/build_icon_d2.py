@@ -9,7 +9,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patheffects as pe
-from matplotlib.colors import BoundaryNorm, ListedColormap
+from matplotlib.colors import BoundaryNorm, ListedColormap, LinearSegmentedColormap
+from matplotlib.patches import Circle, Polygon, FancyBboxPatch
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.spatial import cKDTree
@@ -87,32 +88,52 @@ def render(param, h, decoded):
         grid_cache[key] = (idx,weights)
     idx,weights = grid_cache[key]
     z = (val[mask][idx]*weights).sum(axis=1).reshape(x.shape)
-    fig=plt.figure(figsize=(8,8.5),facecolor="#101a2b")
-    ax=fig.add_axes([.035,.19,.93,.70],projection=ccrs.PlateCarree())
-    cax=fig.add_axes([.12,.095,.76,.025])
+    fig=plt.figure(figsize=(10,11.43),facecolor="#101d2d")
+    ax=fig.add_axes([.03,.15,.94,.67],projection=ccrs.PlateCarree())
+    cax=fig.add_axes([.09,.085,.82,.022])
     ax.set_extent([5.5,15.5,47,55.2],crs=ccrs.PlateCarree())
-    levels=[-30,-20,-15,-10,-5,0,5,10,15,20,25,30,35,40,45]
-    cmap=ListedColormap(["#602080","#843ab5","#3544b8","#3978db","#79c9f2","#d5f1fa","#b9e4a0","#74bc62","#d5df56","#f9df48","#f5a33b","#e85c31","#bd243a","#7e123f"])
-    if PARAMS[param][5] is not None:
-        levels=PARAMS[param][5]
-        cmap=plt.get_cmap("YlGnBu" if param in ("precip","rate","snow") else "YlOrRd",len(levels)-1)
-    norm=BoundaryNorm(levels,cmap.N)
-    im=ax.pcolormesh(x,y,z,cmap=cmap,norm=norm,shading="auto",transform=ccrs.PlateCarree())
-    ax.add_feature(cfeature.BORDERS.with_scale("50m"),linewidth=.8,edgecolor="#263345")
-    ax.coastlines(resolution="50m",linewidth=.8,color="#263345")
-    ax.add_feature(cfeature.NaturalEarthFeature("cultural","admin_1_states_provinces_lines","10m",facecolor="none"),linewidth=.35,edgecolor="#526071")
-    for name,a,b in [("Berlin",52.52,13.405),("Hamburg",53.55,9.99),("München",48.14,11.58),("Köln",50.94,6.96),("Frankfurt",50.11,8.68),("Leipzig",51.34,12.37)]:
-        ax.plot(b,a,"k.",ms=5)
-        ax.annotate(name,(b,a),xytext=(4,5),textcoords="offset points",ha="left",fontsize=8,color="#142136",clip_on=True,path_effects=[pe.withStroke(linewidth=2.5,foreground="white")])
-    fig.text(.035,.965,f"ICON-D2 | Deutschland | {PARAMS[param][1]}\n{valid:%d.%m.%Y %H:%M} UTC | +{h} h",color="white",fontsize=12,va="top")
-    ax.tick_params(colors="white")
-    cb=fig.colorbar(im,cax=cax,orientation="horizontal",label=PARAMS[param][2],extend="both")
-    cb.ax.tick_params(colors="white")
-    cb.ax.xaxis.label.set_color("white")
-    cb.ax.tick_params(labelsize=8)
-    fig.text(.5,.018,"DWD ICON-D2 · Grenzen: Natural Earth · IDW-interpoliert",ha="center",color="white",fontsize=8)
+    palettes={
+        "gust":["#f4f2dd","#d4df86","#f8c84c","#f28a32","#d63c45","#681b64"],
+        "precip":["#f4f5f6","#b9e2ff","#388ed3","#193f90","#23834c","#f0d83b","#f58232","#c82945"],
+        "rate":["#f5f5ef","#b6e2ff","#4c9fdd","#2459a8","#37a35a","#f0dc43","#ef8131","#c92643"],
+        "snow":["#f3f5f6","#d5edff","#8ec8ef","#438bd0","#304da3","#633d9d","#b73e91"]}
+    if param=="t2":
+        ticks=[-30,-20,-15,-10,-5,0,5,10,15,20,25,30,35,40,45]
+        levels=np.arange(-30,46,1)
+        cold=LinearSegmentedColormap.from_list("cold",["#63208a","#2364c4","#a5e2ff"])(np.linspace(0,1,30))
+        warm=LinearSegmentedColormap.from_list("warm",["#7bc66b","#ffe34b","#e54a27","#8b164d"])(np.linspace(0,1,45))
+        levels=np.arange(-30,46)
+        cmap=ListedColormap(np.vstack([cold,warm]))
+    else:
+        ticks=PARAMS[param][5]
+        levels=np.concatenate([np.linspace(a,b,4,endpoint=False) for a,b in zip(ticks[:-1],ticks[1:])]+[[ticks[-1]]])
+        cmap=LinearSegmentedColormap.from_list(param,palettes[param],N=len(levels)-1)
+    norm=BoundaryNorm(levels,cmap.N,clip=True)
+    im=ax.imshow(z,extent=[x.min(),x.max(),y.min(),y.max()],origin="lower",cmap=cmap,norm=norm,interpolation="nearest",transform=ccrs.PlateCarree())
+    outline=[pe.Stroke(linewidth=1.05,foreground="white"),pe.Normal()]
+    ax.add_feature(cfeature.BORDERS.with_scale("10m"),linewidth=.48,edgecolor="#10151c",path_effects=outline,zorder=4)
+    ax.coastlines(resolution="10m",linewidth=.48,color="#10151c",path_effects=outline,zorder=4)
+    ax.add_feature(cfeature.RIVERS.with_scale("50m"),edgecolor="#10151c",linewidth=.35,alpha=.35,zorder=3)
+    ax.add_feature(cfeature.LAKES.with_scale("50m"),facecolor="#10151c",edgecolor="none",alpha=.17,zorder=3)
+    ax.add_feature(cfeature.NaturalEarthFeature("cultural","admin_1_states_provinces_lines","10m",facecolor="none"),linewidth=.28,edgecolor="#28313b",alpha=.7,zorder=3)
+    cities=[("Berlin",52.52,13.405),("Hamburg",53.55,9.99),("München",48.14,11.58),("Köln",50.94,6.96),("Frankfurt",50.11,8.68),("Leipzig",51.34,12.37),("Stuttgart",48.78,9.18),("Bremen",53.08,8.8),("Dresden",51.05,13.74),("Hannover",52.37,9.73),("Nürnberg",49.45,11.08)]
+    for name,a,b in cities:
+        ax.plot(b,a,"k.",ms=3,zorder=5)
+        ax.annotate(name,(b,a),xytext=(3,4),textcoords="offset points",fontsize=7.5,color="#142136",clip_on=True,zorder=6,path_effects=[pe.withStroke(linewidth=1.8,foreground="white")])
+    fig.add_artist(Circle((.05,.95),.018,transform=fig.transFigure,fill=False,edgecolor="#65d9f2",linewidth=1))
+    fig.add_artist(Polygon([(.073,.95),(.038,.961),(.046,.95),(.038,.939)],transform=fig.transFigure,color="#65d9f2"))
+    fig.text(.08,.95,"MeteoOST",fontsize=22,weight="bold",color="#edf5fc",va="center")
+    fig.text(.97,.95,"ICON-D2  /  2,2 km · Deutschland",ha="right",color="#a2b9ce",fontsize=12,va="center")
+    fig.text(.03,.895,PARAMS[param][1],fontsize=20,weight="bold",color="white")
+    fig.text(.03,.86,f"Modellstart {run:%d.%m.%Y %H:%M} UTC  |  Gültig {valid:%d.%m.%Y %H:%M} UTC",fontsize=10,color="#a2b9ce")
+    fig.text(.97,.895,f"+{h} h",ha="right",fontsize=22,weight="bold",color="#65d9f2")
+    cb=fig.colorbar(im,cax=cax,orientation="horizontal",ticks=ticks,extend="both")
+    cb.ax.tick_params(colors="white",labelsize=8,length=2)
+    cb.set_label(PARAMS[param][2],color="white",fontsize=10)
+    fig.text(.03,.022,"DWD · Natural Earth · IDW-interpoliert",color="#a2b9ce",fontsize=8)
+    fig.text(.97,.022,"METEOOST / SIGNATURE",ha="right",color="#a2b9ce",fontsize=8)
     path=OUT/f"{param}_{h:03d}.png"
-    fig.savefig(path,dpi=120,facecolor=fig.get_facecolor())
+    fig.savefig(path,dpi=200,facecolor=fig.get_facecolor(),pil_kwargs={"compress_level":3})
     plt.close(fig)
     products.append(dict(param=param,hours=h,valid=valid.isoformat(),path=f"icon-d2/{path.name}"))
     print(f"Generated {param} +{h:03d}h ({len(products)} maps)", flush=True)
