@@ -45,9 +45,40 @@ jobs:
         with:
           path: _site/icon-d2
           key: icon-d2-${{ hashFiles('scripts/build_icon_d2.py') }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Restore last verified ICON-EU maps
+        uses: actions/cache/restore@v4
+        with:
+          path: _site/icon-eu
+          key: icon-eu-${{ hashFiles('scripts/build_icon_eu.py') }}-pages-${{ github.run_id }}
+          restore-keys: icon-eu-${{ hashFiles('scripts/build_icon_eu.py') }}-
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+  eu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache/restore@v4
+        id: eu
+        with:
+          path: _site/icon-eu
+          key: icon-eu-${{ hashFiles('scripts/build_icon_eu.py') }}-${{ github.run_id }}
+          restore-keys: icon-eu-${{ hashFiles('scripts/build_icon_eu.py') }}-
+      - if: steps.eu.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        run: |
+          pip install numpy scipy matplotlib requests eccodes cartopy
+          python scripts/build_icon_eu.py
+      - run: python -c "import json,pathlib; p=pathlib.Path('_site'); d=json.loads((p/'icon-eu/index.json').read_text()); assert all(sum(x.get('param') == k for x in d['products']) >= 16 for k in ('t2','gust','precip','rate','snow')); assert all((p/x['path']).stat().st_size > 1000 for x in d['products'])"
+      - uses: actions/cache/save@v4
+        if: steps.eu.outputs.cache-matched-key == '' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        with:
+          path: _site/icon-eu
+          key: icon-eu-${{ hashFiles('scripts/build_icon_eu.py') }}-${{ github.run_id }}
   deploy:
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     needs: build
