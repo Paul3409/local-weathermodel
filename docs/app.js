@@ -1,0 +1,13 @@
+"use strict";
+const $=id=>document.getElementById(id);
+const labels={t2:"Temperatur 2 m",t850:"Temperatur 850 hPa","t2-niederschlag":"Temperatur + Niederschlag",neuschnee:"Neuschnee",mslp:"Luftdruck"};
+let rows=[];
+function view(name){for(const id of ["home","ens","models"])$(id).hidden=id!==name;document.querySelectorAll("nav button").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.view===name)));}
+document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>view(b.dataset.view)));
+for(const name of ["ICON-D2","ICON-D2-RUC","ICON-EU","Globalmodelle","KI-Modelle","Radar","Verifikation"]){const a=document.createElement("article"),h=document.createElement("h2"),p=document.createElement("p");h.textContent=name;p.textContent="Integration geplant";a.append(h,p);$("planned").append(a);}
+function options(id,values,label){const s=$(id),old=s.value;s.replaceChildren(...values.map(v=>new Option(label(v),v)));if(values.includes(old))s.value=old;}
+function runLabel(r){return r.slice(6,8)+"."+r.slice(4,6)+"."+r.slice(0,4)+" · "+r.slice(8)+" UTC";}
+function update(){const subset=rows.filter(r=>r.run===$("run").value);options("param",[...new Set(subset.map(r=>r.param))],v=>labels[v]||v);const products=subset.filter(r=>r.param===$("param").value);options("horizon",products.map(r=>String(r.hours)),v=>"+"+v+" h");const item=products.find(r=>String(r.hours)===$("horizon").value);$("chart").hidden=true;$("full").removeAttribute("href");$("caption").textContent="";if(!item){$("message").textContent="Kein Produkt verfügbar.";return;}$("message").textContent="Diagramm wird geladen …";$("chart").src=item.path;$("full").href=item.path;$("caption").textContent=runLabel(item.run)+" · "+(labels[item.param]||item.param)+" · +"+item.hours+" h · Quelle: NOAA GEFS";}
+$("chart").addEventListener("load",()=>{$("chart").hidden=false;$("message").textContent="";});$("chart").addEventListener("error",()=>{$("chart").hidden=true;$("message").textContent="Diagramm konnte nicht geladen werden.";});
+for(const id of ["run","param","horizon"])$(id).addEventListener("change",update);
+fetch("products.json").then(r=>{if(!r.ok)throw Error(r.status);return r.json();}).then(data=>{rows=data.products;options("run",[...new Set(rows.map(r=>r.run))].sort().reverse(),runLabel);$("status").textContent=rows.length?rows.length+" Archivprodukte · jüngster Lauf: "+runLabel($("run").value):"Keine Archivprodukte vorhanden.";update();}).catch(()=>{$("status").textContent=$("message").textContent="Produktindex nicht verfügbar. Bitte später erneut versuchen.";});
