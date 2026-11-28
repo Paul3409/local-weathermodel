@@ -42,9 +42,15 @@ for offset in range(0, 25, 3):
 else:
     raise RuntimeError("No complete ICON-D2 cycle found")
 
+PARAMS = {
+    "t2": ("t_2m", "2-m-Temperatur", "°C", -273.15, 1, None),
+    "gust": ("vmax_10m", "Windböen", "km/h", 0, 3.6, [0,20,40,60,80,100,120,150,200]),
+    "precip": ("tot_prec", "Niederschlagssumme seit Modellstart", "mm", 0, 1, [0,.1,1,2,5,10,20,40,80,150]),
+    "snow": ("h_snow", "Schneehöhe", "cm", 0, 100, [0,.1,1,2,5,10,20,40,80,150]),
+}
 products = []
-for h in hours:
-    response = requests.get(files[h], timeout=90)
+def render(param, h, url, previous=None):
+    response = requests.get(url, timeout=90)
     response.raise_for_status()
     with tempfile.TemporaryFile() as f:
         f.write(bz2.decompress(response.content))
@@ -55,11 +61,13 @@ for h in hours:
         try:
             lat = np.asarray(codes_get_array(gid,"latitudes"))
             lon = np.asarray(codes_get_array(gid,"longitudes"))
-            val = np.asarray(codes_get_array(gid,"values"))-273.15
+            val = np.asarray(codes_get_array(gid,"values")) * PARAMS[param][4] + PARAMS[param][3]
+            if previous is not None:
+                val = np.maximum(0, val-previous)
             valid = datetime.strptime(str(codes_get(gid,"validityDate"))+f'{codes_get(gid,"validityTime"):04d}',"%Y%m%d%H%M").replace(tzinfo=timezone.utc)
         finally:
             codes_release(gid)
-    mask = (lat>=47)&(lat<=55.2)&(lon>=5.5)&(lon<=15.5)&np.isfinite(val)&(val>-100)&(val<70)
+    mask = (lat>=46.8)&(lat<=55.4)&(lon>=5.3)&(lon<=15.7)&np.isfinite(val)&(val>-100)&(val<10000)
     if mask.sum()<100:
         raise ValueError("Insufficient Germany grid points")
     x,y=np.meshgrid(np.linspace(5.5,15.5,450),np.linspace(47,55.2,450))
@@ -68,6 +76,9 @@ for h in hours:
     ax.set_extent([5.5,15.5,47,55.2],crs=ccrs.PlateCarree())
     levels=[-30,-20,-15,-10,-5,0,5,10,15,20,25,30,35,40,45]
     cmap=ListedColormap(["#602080","#843ab5","#3544b8","#3978db","#79c9f2","#d5f1fa","#b9e4a0","#74bc62","#d5df56","#f9df48","#f5a33b","#e85c31","#bd243a","#7e123f"])
+    if PARAMS[param][5] is not None:
+        levels=PARAMS[param][5]
+        cmap=plt.get_cmap("YlGnBu" if param in ("precip","rate","snow") else "YlOrRd",len(levels)-1)
     norm=BoundaryNorm(levels,cmap.N)
     im=ax.pcolormesh(x,y,z,cmap=cmap,norm=norm,shading="auto",transform=ccrs.PlateCarree())
     ax.add_feature(cfeature.BORDERS.with_scale("50m"),linewidth=.8,edgecolor="#263345")
@@ -76,14 +87,37 @@ for h in hours:
     for name,a,b in [("Berlin",52.52,13.405),("Hamburg",53.55,9.99),("München",48.14,11.58),("Köln",50.94,6.96),("Frankfurt",50.11,8.68),("Leipzig",51.34,12.37)]:
         ax.plot(b,a,"k.",ms=5)
         ax.annotate(name,(b,a),xytext=(-3,5),textcoords="offset points",ha="right",fontsize=9,color="black",bbox=dict(fc="white",alpha=.8,ec="none",pad=1))
-    ax.set_title(f"ICON-D2 | Deutschland | 2-m-Temperatur\n{valid:%d.%m.%Y %H:%M} UTC | +{h} h",color="white")
+    ax.set_title(f"ICON-D2 | Deutschland | {PARAMS[param][1]}\n{valid:%d.%m.%Y %H:%M} UTC | +{h} h",color="white")
     ax.tick_params(colors="white")
-    cb=fig.colorbar(im,ax=ax,label="°C",extend="both")
+    cb=fig.colorbar(im,ax=ax,label=PARAMS[param][2],extend="both")
     cb.ax.tick_params(colors="white")
     cb.ax.yaxis.label.set_color("white")
     fig.text(.5,.005,"DWD ICON-D2 · Grenzen: Natural Earth · interpoliert",ha="center",color="white",fontsize=9)
-    path=OUT/f"t2_{h:03d}.png"
+    path=OUT/f"{param}_{h:03d}.png"
     fig.savefig(path,dpi=120,facecolor=fig.get_facecolor())
     plt.close(fig)
-    products.append(dict(hours=h,valid=valid.isoformat(),path=f"icon-d2/{path.name}"))
+    products.append(dict(param=param,hours=h,valid=valid.isoformat(),path=f"icon-d2/{path.name}"))
+    return val
+PARAMS["rate"] = ("tot_prec", "Niederschlag der letzten Stunde", "mm/h", 0, 1, [0,.1,.5,1,2,5,10,20,40,80])
+for param in ("t2","gust","precip","snow"):
+    available = files if param == "t2" else {}
+    if param != "t2":
+        folder = urljoin(BASE, f"{run:%H}/{PARAMS[param][0]}/")
+        response = requests.get(folder, timeout=40)
+        response.raise_for_status()
+        for name in re.findall(r'href="([^"]+)"', response.text):
+            m = re.search(r"_"+stamp+r"_(\d{3})(?:_|\.)", name)
+            if m and name.endswith(".grib2.bz2"):
+                available[int(m[1])] = urljoin(folder,name)
+    previous = None
+    for h in hours:
+        if h not in available:
+            previous = None
+            continue
+        values = render(param,h,available[h])
+        if param == "precip" and previous is not None:
+            render("rate",h,available[h],previous)
+        previous = values
+    if not any(p["param"] == param for p in products):
+        raise RuntimeError(f"No products for {param}")
 (OUT/"index.json").write_text(json.dumps(dict(run=stamp,products=products)),encoding="utf-8")
