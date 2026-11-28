@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
 from matplotlib.colors import BoundaryNorm, ListedColormap
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
@@ -83,7 +84,9 @@ def render(param, h, decoded):
         grid_cache[key] = (idx,weights)
     idx,weights = grid_cache[key]
     z = (val[mask][idx]*weights).sum(axis=1).reshape(x.shape)
-    fig,ax=plt.subplots(figsize=(8,7),layout="constrained",facecolor="#101a2b",subplot_kw={"projection":ccrs.PlateCarree()})
+    fig=plt.figure(figsize=(10,7),facecolor="#101a2b")
+    ax=fig.add_axes([.035,.19,.93,.70],projection=ccrs.PlateCarree())
+    cax=fig.add_axes([.12,.095,.76,.025])
     ax.set_extent([2,27,44,58],crs=ccrs.PlateCarree())
     levels=[-30,-20,-15,-10,-5,0,5,10,15,20,25,30,35,40,45]
     cmap=ListedColormap(["#602080","#843ab5","#3544b8","#3978db","#79c9f2","#d5f1fa","#b9e4a0","#74bc62","#d5df56","#f9df48","#f5a33b","#e85c31","#bd243a","#7e123f"])
@@ -97,13 +100,14 @@ def render(param, h, decoded):
 
     for name,a,b in [("Berlin",52.52,13.405),("Hamburg",53.55,9.99),("München",48.14,11.58),("Köln",50.94,6.96),("Frankfurt",50.11,8.68),("Leipzig",51.34,12.37),("Paris",48.86,2.35),("Wien",48.21,16.37),("Warschau",52.23,21.01),("Prag",50.08,14.44)]:
         ax.plot(b,a,"k.",ms=5)
-        ax.annotate(name,(b,a),xytext=(-3,5),textcoords="offset points",ha="right",fontsize=9,color="black",bbox=dict(fc="white",alpha=.8,ec="none",pad=1))
-    ax.set_title(f"ICON-EU | Mitteleuropa | {PARAMS[param][1]}\n{valid:%d.%m.%Y %H:%M} UTC | +{h} h",color="white")
+        ax.annotate(name,(b,a),xytext=(4,5),textcoords="offset points",ha="left",fontsize=8,color="#142136",clip_on=True,path_effects=[pe.withStroke(linewidth=2.5,foreground="white")])
+    fig.text(.035,.965,f"ICON-EU | Mitteleuropa | {PARAMS[param][1]}\n{valid:%d.%m.%Y %H:%M} UTC | +{h} h",color="white",fontsize=12,va="top")
     ax.tick_params(colors="white")
-    cb=fig.colorbar(im,ax=ax,label=PARAMS[param][2],extend="both")
+    cb=fig.colorbar(im,cax=cax,orientation="horizontal",label=PARAMS[param][2],extend="both")
     cb.ax.tick_params(colors="white")
-    cb.ax.yaxis.label.set_color("white")
-    fig.text(.5,.005,"DWD ICON-EU · Grenzen: Natural Earth · IDW-interpoliert",ha="center",color="white",fontsize=9)
+    cb.ax.xaxis.label.set_color("white")
+    cb.ax.tick_params(labelsize=8)
+    fig.text(.5,.018,"DWD ICON-EU · Grenzen: Natural Earth · IDW-interpoliert",ha="center",color="white",fontsize=8)
     path=OUT/f"{param}_{h:03d}.png"
     fig.savefig(path,dpi=120,facecolor=fig.get_facecolor())
     plt.close(fig)
