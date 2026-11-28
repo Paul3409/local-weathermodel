@@ -2,6 +2,9 @@
 import bz2, json, re, tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+from PIL import Image
+from scipy.ndimage import zoom
 from urllib.parse import urljoin
 import requests
 import numpy as np
@@ -88,6 +91,7 @@ def render(param, h, decoded):
         grid_cache[key] = (idx,weights)
     idx,weights = grid_cache[key]
     z = (val[mask][idx]*weights).sum(axis=1).reshape(x.shape)
+    z=zoom(z,2,order=1)
     fig=plt.figure(figsize=(10,11.43),facecolor="#101d2d")
     ax=fig.add_axes([.03,.15,.94,.67],projection=ccrs.PlateCarree())
     cax=fig.add_axes([.09,.085,.82,.022])
@@ -98,7 +102,7 @@ def render(param, h, decoded):
         "rate":["#f5f5ef","#b6e2ff","#4c9fdd","#2459a8","#37a35a","#f0dc43","#ef8131","#c92643"],
         "snow":["#f3f5f6","#d5edff","#8ec8ef","#438bd0","#304da3","#633d9d","#b73e91"]}
     if param=="t2":
-        ticks=[-30,-20,-15,-10,-5,0,5,10,15,20,25,30,35,40,45]
+        ticks=[-30,-25,-20,-15,-10,-5,0,5,10,15,20,25,30,35,40,45]
         levels=np.arange(-30,46,1)
         cold=LinearSegmentedColormap.from_list("cold",["#63208a","#2364c4","#a5e2ff"])(np.linspace(0,1,30))
         warm=LinearSegmentedColormap.from_list("warm",["#7bc66b","#ffe34b","#e54a27","#8b164d"])(np.linspace(0,1,45))
@@ -122,10 +126,14 @@ def render(param, h, decoded):
         ax.annotate(name,(b,a),xytext=(3,4),textcoords="offset points",fontsize=7.5,color="#142136",clip_on=True,zorder=6,path_effects=[pe.withStroke(linewidth=1.8,foreground="white")])
     fig.add_artist(Circle((.05,.95),.018,transform=fig.transFigure,fill=False,edgecolor="#65d9f2",linewidth=1))
     fig.add_artist(Polygon([(.073,.95),(.038,.961),(.046,.95),(.038,.939)],transform=fig.transFigure,color="#65d9f2"))
-    fig.text(.08,.95,"MeteoOST",fontsize=22,weight="bold",color="#edf5fc",va="center")
+    brand=fig.text(.08,.95,"Meteo",fontsize=22,weight="bold",color="#edf5fc",va="center")
+    fig.canvas.draw()
+    right=brand.get_window_extent().x1/fig.bbox.width
+    fig.text(right,.95,"OST",fontsize=22,weight="bold",color="#65d9f2",va="center")
     fig.text(.97,.95,"ICON-D2  /  2,2 km · Deutschland",ha="right",color="#a2b9ce",fontsize=12,va="center")
     fig.text(.03,.895,PARAMS[param][1],fontsize=20,weight="bold",color="white")
     fig.text(.03,.86,f"Modellstart {run:%d.%m.%Y %H:%M} UTC  |  Gültig {valid:%d.%m.%Y %H:%M} UTC",fontsize=10,color="#a2b9ce")
+    fig.text(.03,.835,f"Ortszeit: {run.astimezone(ZoneInfo('Europe/Berlin')):%d.%m. %H:%M %Z} → {valid.astimezone(ZoneInfo('Europe/Berlin')):%d.%m. %H:%M %Z}",fontsize=9,color="#a2b9ce")
     fig.text(.97,.895,f"+{h} h",ha="right",fontsize=22,weight="bold",color="#65d9f2")
     cb=fig.colorbar(im,cax=cax,orientation="horizontal",ticks=ticks,extend="both")
     cb.ax.tick_params(colors="white",labelsize=8,length=2)
@@ -135,7 +143,11 @@ def render(param, h, decoded):
     path=OUT/f"{param}_{h:03d}.png"
     fig.savefig(path,dpi=200,facecolor=fig.get_facecolor(),pil_kwargs={"compress_level":3})
     plt.close(fig)
-    products.append(dict(param=param,hours=h,valid=valid.isoformat(),path=f"icon-d2/{path.name}"))
+    web=path.with_suffix(".webp")
+    with Image.open(path) as image:
+        image.thumbnail((1200,1350))
+        image.save(web,quality=88,method=2)
+    products.append(dict(param=param,hours=h,valid=valid.isoformat(),path=f"icon-d2/{path.name}",web=f"icon-d2/{web.name}"))
     print(f"Generated {param} +{h:03d}h ({len(products)} maps)", flush=True)
 PARAMS["rate"] = ("tot_prec", "Niederschlag der letzten Stunde", "mm/h", 0, 1, [0,.1,.5,1,2,5,10,20,40,80])
 for param in ("t2","gust","precip","snow"):
